@@ -1,63 +1,57 @@
-import pandas as pd
-import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from xgboost import XGBClassifier
-import joblib
 import os
+import pandas as pd
+import joblib
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from xgboost import XGBClassifier
 
-# Create models folder if it doesn't exist
-os.makedirs("models", exist_ok=True)
+# Auto-detect CSV
+possible_paths = [
+    "scripts/stroke_cleaned.csv",
+    "stroke_cleaned.csv",
+    "data/stroke_cleaned.csv"
+]
 
-# Load dataset
-df = pd.read_csv("scripts/stroke_cleaned.csv")  # Make sure you have cleaned CSV
+csv_path = None
+for path in possible_paths:
+    if os.path.exists(path):
+        csv_path = path
+        break
 
-# Fill missing numeric values
-numeric_cols = ['age', 'avg_glucose_level', 'bmi']
-for col in numeric_cols:
-    df[col] = df[col].fillna(df[col].median())
+if csv_path is None:
+    raise FileNotFoundError("Cannot find stroke_cleaned.csv. Place it in scripts/ or root folder.")
 
-# Encode categorical columns
-categorical_cols = ['gender', 'ever_married', 'work_type', 'Residence_type', 'smoking_status']
-df_encoded = pd.get_dummies(df, columns=categorical_cols, dummy_na=True)
+df = pd.read_csv(csv_path)
 
-# Features and target
-X = df_encoded.drop("stroke", axis=1)
-y = df_encoded["stroke"]
+# Fill missing BMI
+df['bmi'].fillna(df['bmi'].median(), inplace=True)
 
-# Save feature order
+# Define features
+feature_cols = ['gender','age','hypertension','heart_disease','ever_married',
+                'work_type','Residence_type','avg_glucose_level','bmi','smoking_status']
+X = pd.get_dummies(df[feature_cols], drop_first=True)
+y = df['stroke']
+
+# Save feature order for SHAP/streamlit
 feature_order = X.columns.tolist()
-joblib.dump(feature_order, "models/feature_names.pkl")
-print("✅ Feature names saved.")
 
-# Split
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-
-# Scale numeric features
+# Scale numeric
 scaler = StandardScaler()
-X_train[numeric_cols] = scaler.fit_transform(X_train[numeric_cols])
-X_test[numeric_cols] = scaler.transform(X_test[numeric_cols])
+X_scaled = scaler.fit_transform(X)
 
-joblib.dump(scaler, "models/scaler.pkl")
-print("✅ Scaler saved.")
-
-# Train XGBoost
-model = XGBClassifier(
-    n_estimators=200,
-    max_depth=4,
-    learning_rate=0.1,
-    subsample=0.8,
-    colsample_bytree=0.8,
-    random_state=42,
-    use_label_encoder=False,
-    eval_metric='logloss'
+# Train/test split
+X_train, X_test, y_train, y_test = train_test_split(
+    X_scaled, y, test_size=0.2, random_state=42, stratify=y
 )
+
+# Train model
+model = XGBClassifier(use_label_encoder=False, eval_metric="logloss")
 model.fit(X_train, y_train)
 
-# Save model
+# Save artifacts
+os.makedirs("models", exist_ok=True)
 joblib.dump(model, "models/xgb_model.pkl")
-print("✅ Model trained and saved.")
+joblib.dump(scaler, "models/scaler.pkl")
+joblib.dump(feature_order, "models/feature_names.pkl")
 
-# Evaluate
-score = model.score(X_test, y_test)
-print(f"✅ Test Accuracy: {score*100:.2f}%")
+print("✅ Training complete. Model, scaler, and features saved.")
