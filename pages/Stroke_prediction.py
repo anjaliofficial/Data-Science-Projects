@@ -1,4 +1,3 @@
-# pages/Stroke_prediction.py
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -9,7 +8,7 @@ st.set_page_config(page_title="Stroke Prediction", layout="centered")
 st.title("🧠 Stroke Prediction App")
 
 # -----------------------------
-# Paths
+# Paths (Adjust BASE_DIR if necessary based on your project structure)
 # -----------------------------
 BASE_DIR = os.path.dirname(__file__)
 MODEL_DIR = os.path.join(BASE_DIR, "..", "models")
@@ -23,11 +22,15 @@ FEATURES_PATH = os.path.join(MODEL_DIR, "feature_names.pkl")
 # -----------------------------
 @st.cache_resource
 def load_artifacts():
-    model = joblib.load(MODEL_PATH)
-    scaler = joblib.load(SCALER_PATH)
-    feature_order = joblib.load(FEATURES_PATH)
-    return model, scaler, feature_order
-
+    try:
+        model = joblib.load(MODEL_PATH)
+        scaler = joblib.load(SCALER_PATH)
+        feature_order = joblib.load(FEATURES_PATH)
+        return model, scaler, feature_order
+    except FileNotFoundError:
+        st.error("Model artifacts not found. Please ensure the model files are in the 'models' directory.")
+        st.stop()
+        
 model, scaler, feature_order = load_artifacts()
 
 # -----------------------------
@@ -38,8 +41,8 @@ st.sidebar.header("Patient Information")
 def user_input_features():
     gender = st.sidebar.selectbox("Gender", ["Male", "Female", "Other"])
     age = st.sidebar.slider("Age", 0, 100, 50)
-    hypertension = st.sidebar.selectbox("Hypertension", [0, 1])
-    heart_disease = st.sidebar.selectbox("Heart Disease", [0, 1])
+    hypertension = st.sidebar.selectbox("Hypertension (0=No, 1=Yes)", [0, 1])
+    heart_disease = st.sidebar.selectbox("Heart Disease (0=No, 1=Yes)", [0, 1])
     ever_married = st.sidebar.selectbox("Ever Married", ["Yes", "No"])
     work_type = st.sidebar.selectbox("Work Type", ["Private", "Self-employed", "Govt_job", "Children", "Never_worked"])
     residence_type = st.sidebar.selectbox("Residence Type", ["Urban", "Rural"])
@@ -68,6 +71,8 @@ input_df = user_input_features()
 # -----------------------------
 # Fill missing numeric values if any
 numeric_cols = ["age", "avg_glucose_level", "bmi"]
+# Note: In a live app, you might not need this line since Streamlit inputs don't usually produce NaNs, 
+# but we keep it for robustness.
 for col in numeric_cols:
     if col in input_df.columns:
         input_df[col] = input_df[col].fillna(input_df[col].median())
@@ -77,23 +82,28 @@ categorical_cols = ["gender", "ever_married", "work_type", "Residence_type", "sm
 X = pd.get_dummies(input_df, columns=categorical_cols, drop_first=True)
 
 # Align columns with training feature order
+# This is CRUCIAL for correct model prediction
 for col in feature_order:
     if col not in X.columns:
         X[col] = 0
 X = X[feature_order]
 
-# Scale numeric features
+# Scale features
 X_scaled = scaler.transform(X)
 
 # -----------------------------
 # Prediction
 # -----------------------------
-if st.button("Predict Stroke Risk"):
+st.markdown("---")
+if st.button("Predict Stroke Risk", type="primary"):
     pred_proba = model.predict_proba(X_scaled)[:, 1][0]
-    pred_label = "High Risk" if pred_proba >= 0.5 else "Low Risk"
+    
     st.subheader("Prediction Result")
-    st.write(f"**Risk:** {pred_label}")
-    st.write(f"**Probability of Stroke:** {pred_proba:.2%}")
+    
+    if pred_proba >= 0.5:
+        st.error(f"**🔴 High Risk: Probability of Stroke is {pred_proba:.2%}**")
+    else:
+        st.success(f"**🟢 Low Risk: Probability of Stroke is {pred_proba:.2%}**")
 
 # -----------------------------
 # Optional: show user input

@@ -7,9 +7,9 @@ st.title("🧠 Stroke Risk Prediction & Insights")
 st.markdown("""
 Welcome to the **Stroke Risk Prediction System** built with **XGBoost + Streamlit + SHAP**.
 
-Sidebar options:
-- 🔍 Predict Stroke Risk  
-- 📊 Explore Visual Insights  
+Use the sidebar to navigate to the core functions:
+- 🔍 Predict Stroke Risk  
+- 📊 Explore Visual Insights  
 - 🧪 Interpret Model Features with SHAP
 """)
 
