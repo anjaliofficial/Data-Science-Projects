@@ -1,47 +1,64 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import joblib
+import os
 
 st.title("🔍 Stroke Risk Prediction")
 
-# Load artifacts
-model = joblib.load("models/xgb_model.pkl")
-scaler = joblib.load("models/scaler.pkl")
-feature_order = joblib.load("models/feature_names.pkl")
+# Load model artifacts
+@st.cache_data
+def load_artifacts():
+    model = joblib.load("models/xgb_model.pkl")
+    scaler = joblib.load("models/scaler.pkl")
+    feature_order = joblib.load("models/feature_names.pkl")
+    return model, scaler, feature_order
 
-with st.form("stroke_form"):
-    age = st.number_input("Age", 0, 120, 45)
-    bmi = st.number_input("BMI", 10.0, 60.0, 25.0)
-    avg_glucose_level = st.number_input("Average Glucose Level", 40.0, 300.0, 100.0)
+model, scaler, feature_order = load_artifacts()
+
+# Input form
+with st.form("patient_form"):
+    st.subheader("Patient Data")
+    age = st.number_input("Age", min_value=0, max_value=120, value=30)
+    hypertension = st.selectbox("Hypertension", [0, 1])
+    heart_disease = st.selectbox("Heart Disease", [0, 1])
+    avg_glucose_level = st.number_input("Average Glucose Level", min_value=50.0, max_value=500.0, value=100.0)
+    bmi = st.number_input("BMI", min_value=10.0, max_value=60.0, value=25.0)
     gender = st.selectbox("Gender", ["Male", "Female", "Other"])
-    ever_married = st.selectbox("Ever Married", ["No", "Yes"])
-    hypertension = st.selectbox("Hypertension", ["No", "Yes"])
-    heart_disease = st.selectbox("Heart Disease", ["No", "Yes"])
+    ever_married = st.selectbox("Ever Married", ["Yes", "No"])
     work_type = st.selectbox("Work Type", ["Private", "Self-employed", "Govt_job", "Children", "Never_worked"])
-    Residence_type = st.selectbox("Residence Type", ["Urban", "Rural"])
+    residence_type = st.selectbox("Residence Type", ["Urban", "Rural"])
     smoking_status = st.selectbox("Smoking Status", ["formerly smoked", "never smoked", "smokes", "Unknown"])
-
     submitted = st.form_submit_button("Predict Stroke Risk")
 
 if submitted:
-    input_data = pd.DataFrame([{
-        'age': age,
-        'hypertension': 1 if hypertension=="Yes" else 0,
-        'heart_disease': 1 if heart_disease=="Yes" else 0,
-        'bmi': bmi,
-        'avg_glucose_level': avg_glucose_level,
-        'gender': 0 if gender=="Male" else (1 if gender=="Female" else 2),
-        'ever_married': 1 if ever_married=="Yes" else 0,
-        'work_type': {"Private":0, "Self-employed":1, "Govt_job":2, "Children":3, "Never_worked":4}[work_type],
-        'Residence_type': 0 if Residence_type=="Urban" else 1,
-        'smoking_status': {"formerly smoked":0, "never smoked":1, "smokes":2, "Unknown":3}[smoking_status]
+    # Prepare dataframe
+    df = pd.DataFrame([{
+        'age': age, 'hypertension': hypertension, 'heart_disease': heart_disease,
+        'avg_glucose_level': avg_glucose_level, 'bmi': bmi,
+        'gender': gender, 'ever_married': ever_married,
+        'work_type': work_type, 'Residence_type': residence_type,
+        'smoking_status': smoking_status
     }])
-
-    input_data = input_data.reindex(columns=feature_order)
-    input_scaled = scaler.transform(input_data)
-    pred = model.predict(input_scaled)[0]
-    prob = model.predict_proba(input_scaled)[0][1]
-
-    st.subheader("Prediction Results")
-    st.write(f"**Probability of Stroke:** {prob:.2%}")
-    st.write(f"**Predicted Outcome:** {'🟥 High Risk' if pred==1 else '🟩 Low Risk'}")
+    
+    # Ensure all feature columns exist
+    for col in feature_order:
+        if col not in df.columns:
+            df[col] = 0
+    
+    # Encode categorical columns
+    categorical_cols = ['gender', 'ever_married', 'work_type', 'Residence_type', 'smoking_status']
+    df_encoded = pd.get_dummies(df, columns=categorical_cols)
+    
+    # Align with training features
+    for col in feature_order:
+        if col not in df_encoded.columns:
+            df_encoded[col] = 0
+    df_encoded = df_encoded[feature_order]
+    
+    # Scale numeric features
+    X_scaled = scaler.transform(df_encoded)
+    
+    # Predict
+    risk_prob = model.predict_proba(X_scaled)[:, 1][0]
+    st.metric("Stroke Risk Probability", f"{risk_prob*100:.2f}%")
