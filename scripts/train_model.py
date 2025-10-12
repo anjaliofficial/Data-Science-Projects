@@ -1,48 +1,63 @@
 import pandas as pd
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-from imblearn.over_sampling import SMOTE
-import xgboost as xgb
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from xgboost import XGBClassifier
 import joblib
 import os
 
-# Create models folder
+# Create models folder if it doesn't exist
 os.makedirs("models", exist_ok=True)
 
 # Load dataset
-df = pd.read_csv("data/stroke_data.csv")
-df.drop(columns=['id'], inplace=True)
-df['bmi'].fillna(df['bmi'].median(), inplace=True)
+df = pd.read_csv("scripts/stroke_cleaned.csv")  # Make sure you have cleaned CSV
+
+# Fill missing numeric values
+numeric_cols = ['age', 'avg_glucose_level', 'bmi']
+for col in numeric_cols:
+    df[col] = df[col].fillna(df[col].median())
 
 # Encode categorical columns
-cat_cols = ['gender','ever_married','work_type','Residence_type','smoking_status']
-le_dict = {}
-for col in cat_cols:
-    le = LabelEncoder()
-    df[col] = le.fit_transform(df[col])
-    le_dict[col] = le
+categorical_cols = ['gender', 'ever_married', 'work_type', 'Residence_type', 'smoking_status']
+df_encoded = pd.get_dummies(df, columns=categorical_cols, dummy_na=True)
 
-# Features & target
-X = df.drop('stroke', axis=1)
-y = df['stroke']
+# Features and target
+X = df_encoded.drop("stroke", axis=1)
+y = df_encoded["stroke"]
 
 # Save feature order
-joblib.dump(list(X.columns), "models/feature_names.pkl")
+feature_order = X.columns.tolist()
+joblib.dump(feature_order, "models/feature_names.pkl")
+print("✅ Feature names saved.")
 
-# Handle imbalance
-sm = SMOTE(random_state=42)
-X_res, y_res = sm.fit_resample(X, y)
+# Split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
-# Scale
+# Scale numeric features
 scaler = StandardScaler()
-X_res_scaled = scaler.fit_transform(X_res)
+X_train[numeric_cols] = scaler.fit_transform(X_train[numeric_cols])
+X_test[numeric_cols] = scaler.transform(X_test[numeric_cols])
+
 joblib.dump(scaler, "models/scaler.pkl")
+print("✅ Scaler saved.")
 
 # Train XGBoost
-model = xgb.XGBClassifier(
-    n_estimators=300, learning_rate=0.05, max_depth=4,
-    use_label_encoder=False, eval_metric='logloss', random_state=42
+model = XGBClassifier(
+    n_estimators=200,
+    max_depth=4,
+    learning_rate=0.1,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    random_state=42,
+    use_label_encoder=False,
+    eval_metric='logloss'
 )
-model.fit(X_res_scaled, y_res)
-joblib.dump(model, "models/xgb_model.pkl")
+model.fit(X_train, y_train)
 
-print("✅ Training complete. Model, scaler, and features saved.")
+# Save model
+joblib.dump(model, "models/xgb_model.pkl")
+print("✅ Model trained and saved.")
+
+# Evaluate
+score = model.score(X_test, y_test)
+print(f"✅ Test Accuracy: {score*100:.2f}%")
