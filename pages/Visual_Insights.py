@@ -2,16 +2,17 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-st.title("📊 Visual Health Insights")
+st.title("📊 Visual Insights")
 
-df = pd.read_csv("data/stroke_data.csv")
-df['bmi'].fillna(df['bmi'].median(), inplace=True)
-df['age_group'] = pd.cut(df['age'], bins=[0,20,40,60,80,120], labels=['0-20','21-40','41-60','61-80','81+']).astype(str)
+# Load data
+df = pd.read_csv("scripts/stroke_cleaned.csv")
+df.fillna(df.median(numeric_only=True), inplace=True)
 
-# Stroke rate by age
-fig1 = px.histogram(df, x='age_group', color='stroke', barmode='group', title="Stroke Rate by Age Group")
-st.plotly_chart(fig1, use_container_width=True)
+# Age groups
+age_bins = pd.cut(df['age'], bins=[0, 20, 40, 60, 80, 100])
+df['age_group'] = age_bins.astype(str)
 
-# Glucose level distribution
-fig2 = px.box(df, x='stroke', y='avg_glucose_level', color='stroke', title="Glucose Level vs Stroke")
-st.plotly_chart(fig2, use_container_width=True)
+stroke_rate = df.groupby('age_group')['stroke'].mean().reset_index()
+
+fig = px.bar(stroke_rate, x='age_group', y='stroke', labels={'stroke':'Stroke Rate'}, title="Stroke Rate by Age Group")
+st.plotly_chart(fig, use_container_width=True)
