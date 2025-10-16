@@ -75,6 +75,7 @@ if "bmi" in df.columns:
 # One-hot encode and align with model features
 X = pd.get_dummies(df[numeric_cols + categorical_cols], drop_first=True)
 
+# Ensure all training features exist in the input
 for col in feature_order:
     if col not in X.columns:
         X[col] = 0
@@ -114,32 +115,38 @@ st.caption("Select a specific observation to see how features push prediction �
 index = st.slider("Select data index", 0, len(X_scaled) - 1, 0)
 
 shap.initjs()
+# Force plot requires 1-row DataFrame
 force_plot = shap.force_plot(
     explainer.expected_value,
     shap_values[index],
-    X.iloc[index],
+    X.iloc[[index]],  # double brackets
     matplotlib=False
 )
-st.components.v1.html(shap.getjs() + force_plot.html(), height=400)
+st.components.v1.html(force_plot.html(), height=400)
 
 # -----------------------------
-# NEW SECTION: Probability Comparison
+# Prediction Probability Comparison
 # -----------------------------
 st.markdown("---")
 st.subheader("4️⃣ Prediction Probability Comparison")
 st.caption("See how SHAP values shift the prediction probability from the model’s baseline.")
 
-# Model probabilities
 proba = model.predict_proba(X_scaled)
 pred_prob = proba[index, 1]  # Probability of stroke (class 1)
-baseline = 1 / (1 + np.exp(-explainer.expected_value)) if np.isscalar(explainer.expected_value) else np.mean(explainer.expected_value)
+
+# Compute baseline probability from expected_value (log-odds to probability)
+if isinstance(explainer.expected_value, np.ndarray):
+    baseline = explainer.expected_value[1]
+else:
+    baseline = explainer.expected_value
+baseline = 1 / (1 + np.exp(-baseline))
 
 col1, col2, col3 = st.columns(3)
 col1.metric("🩸 Stroke Probability", f"{pred_prob:.2%}")
 col2.metric("⚖️ Baseline (Expected Value)", f"{baseline:.2%}")
 col3.metric("📈 Change", f"{(pred_prob - baseline):+.2%}")
 
-# Visualize comparison
+# Visualize probability comparison
 fig3, ax3 = plt.subplots(figsize=(6, 3))
 ax3.barh(["Baseline", "Predicted"], [baseline, pred_prob], color=["#AAAAAA", "#FF6B6B"])
 ax3.set_xlim(0, 1)
