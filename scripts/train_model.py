@@ -22,7 +22,7 @@ CLEAN_FILE = os.path.join(DATA_DIR, "stroke_cleaned.csv")
 RAW_FILE = os.path.join(DATA_DIR, "stroke_data.csv")
 
 # ---------------------------------------------
-# STEP 2: Auto-clean raw dataset if needed
+# STEP 2: Clean raw dataset if needed
 # ---------------------------------------------
 def clean_data():
     """Cleans raw stroke_data.csv and saves stroke_cleaned.csv"""
@@ -32,7 +32,7 @@ def clean_data():
     df = pd.read_csv(RAW_FILE)
     print(f"✅ Loaded raw data: {df.shape}")
 
-    # Clean column names
+    # Normalize column names
     df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
 
     # Drop duplicates
@@ -40,9 +40,9 @@ def clean_data():
 
     # Fill missing BMI with median
     if "bmi" in df.columns:
-        df["bmi"].fillna(df["bmi"].median(), inplace=True)
+        df["bmi"] = df["bmi"].fillna(df["bmi"].median())
 
-    # Drop irrelevant or ID columns
+    # Drop irrelevant ID columns
     drop_cols = [col for col in ["id", "patient_id"] if col in df.columns]
     df.drop(columns=drop_cols, inplace=True, errors="ignore")
 
@@ -50,7 +50,6 @@ def clean_data():
     df.to_csv(CLEAN_FILE, index=False)
     print(f"✅ Cleaned data saved to: {CLEAN_FILE}")
     return df
-
 
 # ---------------------------------------------
 # STEP 3: Load dataset
@@ -74,12 +73,15 @@ if target_column not in df.columns:
 # Drop missing values
 df = df.dropna()
 
-# Encode categorical columns
-df = pd.get_dummies(df, drop_first=True)
+# Identify categorical columns
+categorical_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
 
-# Split into features and target
-X = df.drop(target_column, axis=1)
-y = df[target_column]
+# One-hot encode categorical variables
+df_encoded = pd.get_dummies(df, columns=categorical_cols, drop_first=True)
+
+# Split features and target
+X = df_encoded.drop(target_column, axis=1)
+y = df_encoded[target_column]
 
 # Scale numeric features
 scaler = StandardScaler()

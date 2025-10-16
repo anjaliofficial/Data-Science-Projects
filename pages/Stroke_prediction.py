@@ -3,12 +3,14 @@ import pandas as pd
 import numpy as np
 import joblib
 import os
+import shap
+import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Stroke Prediction", layout="centered")
-st.title("🧠 Stroke Prediction App")
+st.set_page_config(page_title="Stroke Prediction & SHAP Explanation", layout="centered")
+st.title("🧠 Stroke Prediction App with SHAP Interpretation")
 
 # -----------------------------
-# Paths (Adjust BASE_DIR if necessary based on your project structure)
+# Paths
 # -----------------------------
 BASE_DIR = os.path.dirname(__file__)
 MODEL_DIR = os.path.join(BASE_DIR, "..", "models")
@@ -28,13 +30,13 @@ def load_artifacts():
         feature_order = joblib.load(FEATURES_PATH)
         return model, scaler, feature_order
     except FileNotFoundError:
-        st.error("Model artifacts not found. Please ensure the model files are in the 'models' directory.")
+        st.error("Model artifacts not found. Place model, scaler, feature_names in 'models'.")
         st.stop()
         
 model, scaler, feature_order = load_artifacts()
 
 # -----------------------------
-# User inputs
+# User Inputs
 # -----------------------------
 st.sidebar.header("Patient Information")
 
@@ -69,26 +71,23 @@ input_df = user_input_features()
 # -----------------------------
 # Preprocessing
 # -----------------------------
-# Fill missing numeric values if any
 numeric_cols = ["age", "avg_glucose_level", "bmi"]
-# Note: In a live app, you might not need this line since Streamlit inputs don't usually produce NaNs, 
-# but we keep it for robustness.
-for col in numeric_cols:
-    if col in input_df.columns:
-        input_df[col] = input_df[col].fillna(input_df[col].median())
-
-# One-hot encode categorical variables
 categorical_cols = ["gender", "ever_married", "work_type", "Residence_type", "smoking_status"]
+
+# Fill numeric missing (robustness)
+for col in numeric_cols:
+    input_df[col] = input_df[col].fillna(input_df[col].median())
+
+# One-hot encode
 X = pd.get_dummies(input_df, columns=categorical_cols, drop_first=True)
 
-# Align columns with training feature order
-# This is CRUCIAL for correct model prediction
+# Align features with training
 for col in feature_order:
     if col not in X.columns:
         X[col] = 0
 X = X[feature_order]
 
-# Scale features
+# Scale
 X_scaled = scaler.transform(X)
 
 # -----------------------------
@@ -97,16 +96,33 @@ X_scaled = scaler.transform(X)
 st.markdown("---")
 if st.button("Predict Stroke Risk", type="primary"):
     pred_proba = model.predict_proba(X_scaled)[:, 1][0]
-    
     st.subheader("Prediction Result")
-    
     if pred_proba >= 0.5:
-        st.error(f"**🔴 High Risk: Probability of Stroke is {pred_proba:.2%}**")
+        st.error(f"🔴 High Risk: Probability of Stroke is {pred_proba:.2%}")
     else:
-        st.success(f"**🟢 Low Risk: Probability of Stroke is {pred_proba:.2%}**")
+        st.success(f"🟢 Low Risk: Probability of Stroke is {pred_proba:.2%}")
+
+    # -----------------------------
+    # SHAP Interpretation
+    # -----------------------------
+    st.markdown("### 🧪 SHAP Feature Interpretation")
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer.shap_values(X_scaled)
+
+    # Force plot for individual prediction
+    st.subheader("Individual Prediction Force Plot")
+    shap.initjs()
+    force_html = shap.force_plot(explainer.expected_value, shap_values, X, matplotlib=False)
+    st.components.v1.html(force_html.html(), height=400)
+
+    # SHAP summary plot (bar)
+    st.subheader("Feature Importance (Mean |SHAP|)")
+    fig, ax = plt.subplots(figsize=(10, 5))
+    shap.summary_plot(shap_values, X, feature_names=feature_order, plot_type="bar", show=False)
+    st.pyplot(fig)
 
 # -----------------------------
-# Optional: show user input
+# Optional: Show input
 # -----------------------------
 with st.expander("Show Input Features"):
     st.dataframe(input_df)
