@@ -1,4 +1,5 @@
 # scripts/train_model.py
+
 import os
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -22,7 +23,7 @@ CLEAN_FILE = os.path.join(DATA_DIR, "stroke_cleaned.csv")
 RAW_FILE = os.path.join(DATA_DIR, "stroke_data.csv")
 
 # ---------------------------------------------
-# STEP 2: Clean raw dataset if needed
+# STEP 2: Clean raw dataset
 # ---------------------------------------------
 def clean_data():
     """Cleans raw stroke_data.csv and saves stroke_cleaned.csv"""
@@ -32,23 +33,24 @@ def clean_data():
     df = pd.read_csv(RAW_FILE)
     print(f"✅ Loaded raw data: {df.shape}")
 
-    # Normalize column names
     df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
-
-    # Drop duplicates
     df.drop_duplicates(inplace=True)
 
-    # Fill missing BMI with median
-    if "bmi" in df.columns:
-        df["bmi"] = df["bmi"].fillna(df["bmi"].median())
-
-    # Drop irrelevant ID columns
     drop_cols = [col for col in ["id", "patient_id"] if col in df.columns]
     df.drop(columns=drop_cols, inplace=True, errors="ignore")
 
-    # Save cleaned data
+    # Handle Missing BMI
+    if "bmi" in df.columns:
+        df["bmi"] = df["bmi"].fillna(df["bmi"].median())
+
+    # Drop 'Other' gender and any remaining NaNs
+    if 'gender' in df.columns:
+        df = df[df['gender'] != 'Other']
+    
+    df = df.dropna()
+
     df.to_csv(CLEAN_FILE, index=False)
-    print(f"✅ Cleaned data saved to: {CLEAN_FILE}")
+    print(f"✅ Cleaned data saved to: {CLEAN_FILE} ({df.shape[0]} rows remaining)")
     return df
 
 # ---------------------------------------------
@@ -70,16 +72,10 @@ target_column = "stroke"
 if target_column not in df.columns:
     raise ValueError(f"❌ Target column '{target_column}' not found in dataset.")
 
-# Drop missing values
-df = df.dropna()
-
-# Identify categorical columns
 categorical_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
 
-# One-hot encode categorical variables
 df_encoded = pd.get_dummies(df, columns=categorical_cols, drop_first=True)
 
-# Split features and target
 X = df_encoded.drop(target_column, axis=1)
 y = df_encoded[target_column]
 
@@ -88,21 +84,31 @@ scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
 
 # ---------------------------------------------
-# STEP 5: Train-Test Split
+# STEP 5: Train-Test Split (Stratified)
 # ---------------------------------------------
-X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(
+    X_scaled, y, 
+    test_size=0.2, 
+    random_state=42, 
+    stratify=y  # Important for imbalanced data
+)
 
 # ---------------------------------------------
 # STEP 6: Train Model
 # ---------------------------------------------
-model = RandomForestClassifier(random_state=42)
+print("\n⚙️ Training RandomForestClassifier with balanced weights...")
+model = RandomForestClassifier(
+    random_state=42, 
+    class_weight='balanced' # Important for imbalanced data
+) 
 model.fit(X_train, y_train)
+print("✅ Training complete.")
 
 # ---------------------------------------------
 # STEP 7: Evaluate Model
 # ---------------------------------------------
 y_pred = model.predict(X_test)
-print("\n📊 Classification Report:")
+print("\n📊 Classification Report on Test Set:")
 print(classification_report(y_test, y_pred))
 
 # ---------------------------------------------

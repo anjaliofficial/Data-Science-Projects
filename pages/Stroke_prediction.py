@@ -1,4 +1,4 @@
-# pages/Predict_Stroke.py
+# pages/Stroke_prediction.py (Corrected - based on previous structure)
 
 import streamlit as st
 import pandas as pd
@@ -22,6 +22,19 @@ SCALER_PATH = os.path.join(MODEL_DIR, "scaler.pkl")
 FEATURES_PATH = os.path.join(MODEL_DIR, "feature_names.pkl")
 
 # -----------------------------
+# Helper Function for SHAP Base Value (REUSED FIX)
+# -----------------------------
+def get_expected_value(explainer):
+    """Safely retrieves the base value (log-odds) for the positive class (index 1)."""
+    ev = explainer.expected_value
+    if isinstance(ev, np.ndarray):
+        if ev.ndim == 1 and ev.size >= 2:
+            return ev[1]
+        return ev[0]
+    return ev
+
+
+# -----------------------------
 # Load Artifacts
 # -----------------------------
 @st.cache_resource
@@ -32,22 +45,19 @@ def load_artifacts():
         feature_order = joblib.load(FEATURES_PATH)
         explainer = shap.TreeExplainer(model)
         return model, scaler, feature_order, explainer
-    except FileNotFoundError as e:
-        st.error(f"❌ Required model artifact not found: {e.filename}. Please run 'scripts/train_model.py' first.")
-        st.stop()
     except Exception as e:
-        st.error(f"❌ Error loading artifacts: {e}")
+        st.error(f"❌ Error loading artifacts. Please run train_model.py first: {e}")
         st.stop()
-
 
 model, scaler, feature_order, explainer = load_artifacts()
+base_value = get_expected_value(explainer) # Get base value once
 
 # -----------------------------
 # User Input
 # -----------------------------
 st.sidebar.header("Patient Information")
 def user_input_features():
-    # Input widgets mirroring the data features
+    # ... (Your input widgets here) ...
     gender = st.sidebar.selectbox("Gender", ["Male", "Female", "Other"])
     age = st.sidebar.slider("Age", 0, 100, 50)
     hypertension = st.sidebar.selectbox("Hypertension (0=No, 1=Yes)", [0, 1])
@@ -78,14 +88,14 @@ input_df = user_input_features()
 # -----------------------------
 # Preprocessing
 # -----------------------------
-# One-hot encode and align features for prediction
+# One-hot encode and align features (X will be unscaled, one-hot encoded input)
 X = pd.get_dummies(input_df, drop_first=True)
 for col in feature_order:
     if col not in X.columns:
         X[col] = 0
 X = X[feature_order]
 
-# Scale
+# Scale for model prediction
 X_scaled = scaler.transform(X)
 
 # -----------------------------
@@ -95,42 +105,39 @@ if st.button("Predict Stroke Risk", type="primary"):
     pred_proba = model.predict_proba(X_scaled)[:, 1][0]
     st.subheader("Prediction Result")
     
-    # Display Prediction
     if pred_proba >= 0.5:
         st.error(f"🔴 High Risk: Probability of Stroke is **{pred_proba:.2%}**")
     else:
         st.success(f"🟢 Low Risk: Probability of Stroke is **{pred_proba:.2%}**")
 
     # -----------------------------
-    # SHAP explanation for this input (FIX APPLIED HERE)
+    # SHAP explanation for this input (FIXES APPLIED HERE)
     # -----------------------------
-    st.markdown("### 🧪 Individual SHAP Feature Interpretation")
+    st.markdown("### 🧪 SHAP Feature Interpretation")
 
-    # Compute SHAP values for the single input
-    shap_values_input = explainer.shap_values(X_scaled)
+    # Use the unscaled, one-hot encoded X for SHAP value calculation
+    shap_values_input = explainer.shap_values(X) 
     if isinstance(shap_values_input, list):
         shap_values_input = shap_values_input[1]  # class 1 = stroke
 
-    # Individual force plot using the interactive HTML plot
-    st.subheader("1. Individual Force Plot")
-    st.markdown("This plot shows how each feature pushes the prediction from the base value to the final output.")
-    
+    # Individual force plot
+    st.subheader("Individual Force Plot")
     shap.initjs()
     force_plot = shap.plots.force(
-        explainer.expected_value[1] if isinstance(explainer.expected_value, np.ndarray) else explainer.expected_value,
-        shap_values_input[0], # Single sample
-        X.iloc[0],
-        matplotlib=False # Must be False for Streamlit embedding
+        base_value,             # Safely derived base value
+        shap_values_input[0],
+        X,                      # Pass X (DataFrame with one row)
+        matplotlib=False
     )
     st.components.v1.html(force_plot.html(), height=400)
-
-    # Waterfall plot
-    st.subheader("2. Waterfall Plot")
+    
+    # Feature importance bar plot
+    st.subheader("Feature Importance (Waterfall Plot)")
     fig, ax = plt.subplots(figsize=(10, 5))
     shap.plots.waterfall(
         shap.Explanation(
             values=shap_values_input[0],
-            base_values=explainer.expected_value[1] if isinstance(explainer.expected_value, np.ndarray) else explainer.expected_value,
+            base_values=base_value,
             data=X.iloc[0],
             feature_names=feature_order
         ), 
