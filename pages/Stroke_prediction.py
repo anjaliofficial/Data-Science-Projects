@@ -1,103 +1,80 @@
-# pages/SHAP_Interpretation.py
+# pages/Predict_Stroke.py
 import streamlit as st
 import pandas as pd
 import joblib
 import os
-import shap
-import matplotlib.pyplot as plt
+import numpy as np
 
-st.set_page_config(page_title="🧪 SHAP Feature Interpretation", layout="wide")
-st.title("🧪 SHAP Feature Interpretation")
-st.markdown("""
-Understand how the model makes predictions by analyzing **feature contributions** using SHAP values.
-This helps explain why the model predicted stroke risk for each observation.
-""")
+st.set_page_config(page_title="Predict Stroke Risk", layout="centered")
+st.title("🔍 Predict Stroke Risk")
 
-# -----------------------------
 # Paths
-# -----------------------------
 BASE_DIR = os.path.dirname(__file__)
 MODEL_DIR = os.path.join(BASE_DIR, "..", "models")
-DATA_DIR = os.path.join(BASE_DIR, "..", "data")
 
 MODEL_PATH = os.path.join(MODEL_DIR, "stroke_model.pkl")
 SCALER_PATH = os.path.join(MODEL_DIR, "scaler.pkl")
 FEATURES_PATH = os.path.join(MODEL_DIR, "feature_names.pkl")
-CSV_PATH = os.path.join(DATA_DIR, "stroke_cleaned.csv")
 
-# -----------------------------
-# Load Artifacts
-# -----------------------------
+# Load model artifacts
 @st.cache_resource
-def load_model_artifacts():
+def load_artifacts():
     model = joblib.load(MODEL_PATH)
     scaler = joblib.load(SCALER_PATH)
     feature_order = joblib.load(FEATURES_PATH)
     return model, scaler, feature_order
 
-model, scaler, feature_order = load_model_artifacts()
+model, scaler, feature_order = load_artifacts()
 
-if not os.path.exists(CSV_PATH):
-    st.error(f"❌ Data file not found: {CSV_PATH}")
-    st.stop()
+# User Input
+st.sidebar.header("Patient Information")
+def user_input_features():
+    gender = st.sidebar.selectbox("Gender", ["Male", "Female", "Other"])
+    age = st.sidebar.slider("Age", 0, 100, 50)
+    hypertension = st.sidebar.selectbox("Hypertension", [0, 1])
+    heart_disease = st.sidebar.selectbox("Heart Disease", [0, 1])
+    ever_married = st.sidebar.selectbox("Ever Married", ["Yes", "No"])
+    work_type = st.sidebar.selectbox("Work Type", ["Private", "Self-employed", "Govt_job", "Children", "Never_worked"])
+    residence_type = st.sidebar.selectbox("Residence Type", ["Urban", "Rural"])
+    avg_glucose_level = st.sidebar.number_input("Average Glucose Level", 50.0, 300.0, 100.0)
+    bmi = st.sidebar.number_input("BMI", 10.0, 60.0, 25.0)
+    smoking_status = st.sidebar.selectbox("Smoking Status", ["formerly smoked", "never smoked", "smokes", "Unknown"])
+    
+    data = {
+        "gender": gender,
+        "age": age,
+        "hypertension": hypertension,
+        "heart_disease": heart_disease,
+        "ever_married": ever_married,
+        "work_type": work_type,
+        "residence_type": residence_type,
+        "avg_glucose_level": avg_glucose_level,
+        "bmi": bmi,
+        "smoking_status": smoking_status
+    }
+    return pd.DataFrame([data])
 
-df = pd.read_csv(CSV_PATH)
-df.columns = df.columns.str.lower().str.strip()
+input_df = user_input_features()
 
-# -----------------------------
 # Preprocessing
-# -----------------------------
-categorical_cols = [c for c in ['gender','ever_married','work_type','residence_type','smoking_status'] if c in df.columns]
-numeric_cols = [c for c in ['age','avg_glucose_level','bmi','hypertension','heart_disease'] if c in df.columns]
+numeric_cols = ["age", "avg_glucose_level", "bmi"]
+categorical_cols = ["gender", "ever_married", "work_type", "residence_type", "smoking_status"]
 
-if "bmi" in df.columns:
-    df['bmi'] = df['bmi'].fillna(df['bmi'].median())
-
-X = pd.get_dummies(df[numeric_cols + categorical_cols], drop_first=True)
+X = pd.get_dummies(input_df, columns=categorical_cols, drop_first=True)
 for col in feature_order:
     if col not in X.columns:
         X[col] = 0
 X = X[feature_order]
 X_scaled = scaler.transform(X)
 
-# -----------------------------
-# Cache SHAP Explainer
-# -----------------------------
-@st.cache_resource
-def get_explainer(_model):
-    return shap.TreeExplainer(_model)
-
-explainer = get_explainer(model)
-
-# -----------------------------
-# SHAP Analysis
-# -----------------------------
-st.markdown("## 🔍 SHAP Analysis")
-with st.spinner("Computing SHAP values..."):
-    shap_values = explainer(X_scaled, check_additivity=False)
-
-# --- Summary Plot ---
-st.subheader("1️⃣ SHAP Summary Plot")
-fig, ax = plt.subplots(figsize=(12, 8))
-shap.summary_plot(shap_values, X, show=False)
-st.pyplot(fig, clear_figure=True)
-
-# --- Bar Plot (Mean |SHAP|) ---
-st.subheader("2️⃣ SHAP Feature Importance")
-fig2, ax2 = plt.subplots(figsize=(12, 6))
-shap.summary_plot(shap_values, X, plot_type="bar", show=False)
-st.pyplot(fig2, clear_figure=True)
-
-# --- Individual Force Plot ---
+# Prediction
 st.markdown("---")
-st.subheader("3️⃣ Explore Individual Prediction")
-index = st.slider("Select data index", 0, len(X_scaled)-1, 0)
+if st.button("Predict Stroke Risk"):
+    pred_proba = model.predict_proba(X_scaled)[:, 1][0]
+    if pred_proba >= 0.5:
+        st.error(f"🔴 High Risk: Probability of Stroke is {pred_proba:.2%}")
+    else:
+        st.success(f"🟢 Low Risk: Probability of Stroke is {pred_proba:.2%}")
 
-force_plot = shap.force_plot(
-    explainer.expected_value,
-    shap_values[index],
-    X.iloc[[index]],
-    matplotlib=False
-)
-shap.initjs()
-st.components.v1.html(force_plot.html(), height=400)
+with st.expander("Show Input Features"):
+    st.dataframe(input_df)
