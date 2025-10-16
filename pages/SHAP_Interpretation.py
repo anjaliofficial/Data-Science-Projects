@@ -53,14 +53,12 @@ if not os.path.exists(CSV_PATH):
     st.error(f"❌ Data file not found: {CSV_PATH}. Please ensure your cleaned data exists.")
     st.stop()
 
+# -----------------------------
+# Load dataset
+# -----------------------------
 df = pd.read_csv(CSV_PATH)
-
-# Normalize column names
 df.columns = df.columns.str.lower().str.strip()
 
-# -----------------------------
-# Preprocessing
-# -----------------------------
 categorical_cols = [c for c in ['gender', 'ever_married', 'work_type', 'residence_type', 'smoking_status'] if c in df.columns]
 numeric_cols = [c for c in ['age', 'avg_glucose_level', 'bmi', 'hypertension', 'heart_disease'] if c in df.columns]
 
@@ -74,8 +72,6 @@ if "bmi" in df.columns:
 
 # One-hot encode and align with model features
 X = pd.get_dummies(df[numeric_cols + categorical_cols], drop_first=True)
-
-# Ensure all training features exist in the input
 for col in feature_order:
     if col not in X.columns:
         X[col] = 0
@@ -85,41 +81,51 @@ X = X[feature_order]
 X_scaled = scaler.transform(X)
 
 # -----------------------------
-# SHAP Analysis
+# Cache SHAP computation for speed
 # -----------------------------
-st.markdown("## 🔍 SHAP Analysis")
-
-with st.spinner("Computing SHAP values..."):
+@st.cache_resource
+def compute_shap(model, X_scaled):
     explainer = shap.TreeExplainer(model)
     shap_values = explainer(X_scaled, check_additivity=False)
+    return explainer, shap_values
 
-# --- Plot 1: Summary (Dot Plot) ---
-st.subheader("1️⃣ SHAP Summary Plot")
-st.caption("Each dot shows how a feature impacts predictions. Red = higher feature value, Blue = lower.")
+with st.spinner("Computing SHAP values (cached for speed)..."):
+    explainer, shap_values = compute_shap(model, X_scaled)
+
+# -----------------------------
+# SHAP Summary Plots (sampled for speed)
+# -----------------------------
+sample_size = min(200, X.shape[0])
+sample_idx = np.random.choice(X.shape[0], sample_size, replace=False)
+X_sample = X.iloc[sample_idx]
+shap_values_sample = shap_values[sample_idx]
+
+st.subheader("1️⃣ SHAP Summary Plot (Sampled)")
+st.caption("Red = higher feature value, Blue = lower feature value.")
 fig, ax = plt.subplots(figsize=(12, 8))
-shap.summary_plot(shap_values, X, show=False)
+shap.summary_plot(shap_values_sample, X_sample, show=False)
 st.pyplot(fig, clear_figure=True)
 
-# --- Plot 2: Mean Feature Importance ---
 st.subheader("2️⃣ SHAP Bar Plot (Average Feature Impact)")
 st.caption("Average magnitude of feature influence on predictions.")
 fig2, ax2 = plt.subplots(figsize=(12, 6))
-shap.summary_plot(shap_values, X, plot_type="bar", show=False)
+shap.summary_plot(shap_values_sample, X_sample, plot_type="bar", show=False)
 st.pyplot(fig2, clear_figure=True)
 
-# --- Plot 3: Individual Force Plot ---
+# -----------------------------
+# Individual Prediction Force Plot
+# -----------------------------
 st.markdown("---")
 st.subheader("3️⃣ Explore Individual Predictions")
 st.caption("Select a specific observation to see how features push prediction ↑ (red) or ↓ (blue).")
 
-index = st.slider("Select data index", 0, len(X_scaled) - 1, 0)
+index = st.slider("Select data index", 0, X_scaled.shape[0]-1, 0)
 
 shap.initjs()
-# Force plot requires 1-row DataFrame
 force_plot = shap.force_plot(
     explainer.expected_value,
     shap_values[index],
-    X.iloc[[index]],  # double brackets
+    X.iloc[[index]],
     matplotlib=False
 )
 st.components.v1.html(force_plot.html(), height=400)
@@ -132,21 +138,16 @@ st.subheader("4️⃣ Prediction Probability Comparison")
 st.caption("See how SHAP values shift the prediction probability from the model’s baseline.")
 
 proba = model.predict_proba(X_scaled)
-pred_prob = proba[index, 1]  # Probability of stroke (class 1)
+pred_prob = proba[index, 1]
 
-# Compute baseline probability from expected_value (log-odds to probability)
-if isinstance(explainer.expected_value, np.ndarray):
-    baseline = explainer.expected_value[1]
-else:
-    baseline = explainer.expected_value
-baseline = 1 / (1 + np.exp(-baseline))
+# Convert expected_value (log-odds) to probability
+baseline = 1 / (1 + np.exp(-explainer.expected_value)) if np.isscalar(explainer.expected_value) else np.mean(1 / (1 + np.exp(-explainer.expected_value)))
 
 col1, col2, col3 = st.columns(3)
 col1.metric("🩸 Stroke Probability", f"{pred_prob:.2%}")
 col2.metric("⚖️ Baseline (Expected Value)", f"{baseline:.2%}")
 col3.metric("📈 Change", f"{(pred_prob - baseline):+.2%}")
 
-# Visualize probability comparison
 fig3, ax3 = plt.subplots(figsize=(6, 3))
 ax3.barh(["Baseline", "Predicted"], [baseline, pred_prob], color=["#AAAAAA", "#FF6B6B"])
 ax3.set_xlim(0, 1)

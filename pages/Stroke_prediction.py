@@ -12,7 +12,6 @@ st.title("🔍 Predict Stroke Risk")
 # Paths
 BASE_DIR = os.path.dirname(__file__)
 MODEL_DIR = os.path.join(BASE_DIR, "..", "models")
-
 MODEL_PATH = os.path.join(MODEL_DIR, "stroke_model.pkl")
 SCALER_PATH = os.path.join(MODEL_DIR, "scaler.pkl")
 FEATURES_PATH = os.path.join(MODEL_DIR, "feature_names.pkl")
@@ -23,9 +22,10 @@ def load_artifacts():
     model = joblib.load(MODEL_PATH)
     scaler = joblib.load(SCALER_PATH)
     feature_order = joblib.load(FEATURES_PATH)
-    return model, scaler, feature_order
+    explainer = shap.TreeExplainer(model)
+    return model, scaler, feature_order, explainer
 
-model, scaler, feature_order = load_artifacts()
+model, scaler, feature_order, explainer = load_artifacts()
 
 # User input
 st.sidebar.header("Patient Information")
@@ -61,18 +61,11 @@ input_df = user_input_features()
 numeric_cols = ["age", "avg_glucose_level", "bmi"]
 categorical_cols = ["gender", "ever_married", "work_type", "residence_type", "smoking_status"]
 
-for col in numeric_cols:
-    input_df[col] = input_df[col].fillna(input_df[col].median())
-
 X = pd.get_dummies(input_df, columns=categorical_cols, drop_first=True)
-
-# Align columns
 for col in feature_order:
     if col not in X.columns:
         X[col] = 0
 X = X[feature_order]
-
-# Scale
 X_scaled = scaler.transform(X)
 
 # Prediction
@@ -85,14 +78,13 @@ if st.button("Predict Stroke Risk", type="primary"):
     else:
         st.success(f"🟢 Low Risk: Probability of Stroke is {pred_proba:.2%}")
 
-    # SHAP explanation
+    # SHAP explanation (single row only)
     st.markdown("### 🧪 SHAP Feature Interpretation")
-    explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(X_scaled)
 
     st.subheader("Individual Force Plot")
     shap.initjs()
-    force_html = shap.force_plot(explainer.expected_value, shap_values, X, matplotlib=False)
+    force_html = shap.force_plot(explainer.expected_value, shap_values, X_scaled, matplotlib=False)
     st.components.v1.html(force_html.html(), height=400)
 
     st.subheader("Feature Importance (Mean |SHAP|)")
