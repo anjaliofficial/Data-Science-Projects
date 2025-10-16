@@ -1,57 +1,119 @@
+# scripts/train_model.py
 import os
 import pandas as pd
-import joblib
-from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
-from xgboost import XGBClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import classification_report
+import joblib
 
-# Auto-detect CSV
-possible_paths = [
-    "scripts/stroke_cleaned.csv",
-    "stroke_cleaned.csv",
-    "data/stroke_cleaned.csv"
-]
+# ---------------------------------------------
+# STEP 1: Define paths
+# ---------------------------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.join(BASE_DIR, "..")
+DATA_DIR = os.path.join(ROOT_DIR, "data")
+MODEL_DIR = os.path.join(ROOT_DIR, "models")
 
-csv_path = None
-for path in possible_paths:
-    if os.path.exists(path):
-        csv_path = path
-        break
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(MODEL_DIR, exist_ok=True)
 
-if csv_path is None:
-    raise FileNotFoundError("Cannot find stroke_cleaned.csv. Place it in scripts/ or root folder.")
+CLEAN_FILE = os.path.join(DATA_DIR, "stroke_cleaned.csv")
+RAW_FILE = os.path.join(DATA_DIR, "stroke_data.csv")
 
-df = pd.read_csv(csv_path)
+# ---------------------------------------------
+# STEP 2: Auto-clean raw dataset if needed
+# ---------------------------------------------
+def clean_data():
+    """Cleans raw stroke_data.csv and saves stroke_cleaned.csv"""
+    if not os.path.exists(RAW_FILE):
+        raise FileNotFoundError(f"❌ Cannot find {RAW_FILE}. Please place stroke_data.csv inside 'data/' folder.")
 
-# Fill missing BMI
-df['bmi'].fillna(df['bmi'].median(), inplace=True)
+    df = pd.read_csv(RAW_FILE)
+    print(f"✅ Loaded raw data: {df.shape}")
 
-# Define features
-feature_cols = ['gender','age','hypertension','heart_disease','ever_married',
-                'work_type','Residence_type','avg_glucose_level','bmi','smoking_status']
-X = pd.get_dummies(df[feature_cols], drop_first=True)
-y = df['stroke']
+    # Clean column names
+    df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
 
-# Save feature order for SHAP/streamlit
-feature_order = X.columns.tolist()
+    # Drop duplicates
+    df.drop_duplicates(inplace=True)
 
-# Scale numeric
+    # Fill missing BMI with median
+    if "bmi" in df.columns:
+        df["bmi"].fillna(df["bmi"].median(), inplace=True)
+
+    # Drop irrelevant or ID columns
+    drop_cols = [col for col in ["id", "patient_id"] if col in df.columns]
+    df.drop(columns=drop_cols, inplace=True, errors="ignore")
+
+    # Save cleaned data
+    df.to_csv(CLEAN_FILE, index=False)
+    print(f"✅ Cleaned data saved to: {CLEAN_FILE}")
+    return df
+
+
+# ---------------------------------------------
+# STEP 3: Load dataset
+# ---------------------------------------------
+if os.path.exists(CLEAN_FILE):
+    print(f"✅ Using existing cleaned data: {CLEAN_FILE}")
+    df = pd.read_csv(CLEAN_FILE)
+else:
+    print("⚠️ stroke_cleaned.csv not found — cleaning raw data now...")
+    df = clean_data()
+
+print("Columns in dataset:", df.columns.tolist())
+
+# ---------------------------------------------
+# STEP 4: Prepare data
+# ---------------------------------------------
+target_column = "stroke"
+if target_column not in df.columns:
+    raise ValueError(f"❌ Target column '{target_column}' not found in dataset.")
+
+# Drop missing values
+df = df.dropna()
+
+# Encode categorical columns
+df = pd.get_dummies(df, drop_first=True)
+
+# Split into features and target
+X = df.drop(target_column, axis=1)
+y = df[target_column]
+
+# Scale numeric features
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
 
-# Train/test split
-X_train, X_test, y_train, y_test = train_test_split(
-    X_scaled, y, test_size=0.2, random_state=42, stratify=y
-)
+# ---------------------------------------------
+# STEP 5: Train-Test Split
+# ---------------------------------------------
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
 
-# Train model
-model = XGBClassifier(use_label_encoder=False, eval_metric="logloss")
+# ---------------------------------------------
+# STEP 6: Train Model
+# ---------------------------------------------
+model = RandomForestClassifier(random_state=42)
 model.fit(X_train, y_train)
 
-# Save artifacts
-os.makedirs("models", exist_ok=True)
-joblib.dump(model, "models/xgb_model.pkl")
-joblib.dump(scaler, "models/scaler.pkl")
-joblib.dump(feature_order, "models/feature_names.pkl")
+# ---------------------------------------------
+# STEP 7: Evaluate Model
+# ---------------------------------------------
+y_pred = model.predict(X_test)
+print("\n📊 Classification Report:")
+print(classification_report(y_test, y_pred))
 
-print("✅ Training complete. Model, scaler, and features saved.")
+# ---------------------------------------------
+# STEP 8: Save Model Artifacts
+# ---------------------------------------------
+model_path = os.path.join(MODEL_DIR, "stroke_model.pkl")
+scaler_path = os.path.join(MODEL_DIR, "scaler.pkl")
+feature_names_path = os.path.join(MODEL_DIR, "feature_names.pkl")
+
+joblib.dump(model, model_path)
+joblib.dump(scaler, scaler_path)
+joblib.dump(X.columns.tolist(), feature_names_path)
+
+print(f"\n✅ Model saved successfully: {model_path}")
+print(f"✅ Scaler saved: {scaler_path}")
+print(f"✅ Feature names saved: {feature_names_path}")

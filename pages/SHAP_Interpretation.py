@@ -6,6 +6,9 @@ import shap
 import matplotlib.pyplot as plt
 import os
 
+# -----------------------------
+# Page config
+# -----------------------------
 st.set_page_config(page_title="🧪 SHAP Feature Interpretation", layout="wide")
 st.title("🧪 SHAP Feature Interpretation")
 st.markdown("Understand how the XGBoost model makes predictions by analyzing feature contributions.")
@@ -13,47 +16,57 @@ st.markdown("Understand how the XGBoost model makes predictions by analyzing fea
 # -----------------------------
 # Paths
 # -----------------------------
-BASE_DIR = os.path.dirname(__file__)
-MODEL_DIR = os.path.join(BASE_DIR, "..", "models")
-DATA_DIR = os.path.join(BASE_DIR, "..", "data")
+# Get folder of this file (SHAP page)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Model and data directories
+MODEL_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "models"))
+DATA_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "data"))
 
 MODEL_PATH = os.path.join(MODEL_DIR, "xgb_model.pkl")
 SCALER_PATH = os.path.join(MODEL_DIR, "scaler.pkl")
 FEATURES_PATH = os.path.join(MODEL_DIR, "feature_names.pkl")
-CSV_PATH = os.path.join(DATA_DIR, "stroke_cleaned.csv") # Ensure your cleaned CSV is here
+CSV_PATH = os.path.join(DATA_DIR, "stroke_cleaned.csv")
 
 # -----------------------------
-# Load artifacts and Data
+# Load artifacts safely
 # -----------------------------
 @st.cache_resource
 def load_artifacts():
-    try:
-        model = joblib.load(MODEL_PATH)
-        scaler = joblib.load(SCALER_PATH)
-        feature_order = joblib.load(FEATURES_PATH)
-        return model, scaler, feature_order
-    except FileNotFoundError:
-        return None, None, None
+    if not os.path.exists(MODEL_PATH):
+        st.error(f"Model file not found: {MODEL_PATH}")
+        st.stop()
+    if not os.path.exists(SCALER_PATH):
+        st.error(f"Scaler file not found: {SCALER_PATH}")
+        st.stop()
+    if not os.path.exists(FEATURES_PATH):
+        st.error(f"Feature names file not found: {FEATURES_PATH}")
+        st.stop()
+
+    model = joblib.load(MODEL_PATH)
+    scaler = joblib.load(SCALER_PATH)
+    feature_order = joblib.load(FEATURES_PATH)
+    return model, scaler, feature_order
 
 model, scaler, feature_order = load_artifacts()
 
-if model is None:
-    st.error("Model artifacts not found. Please run the training script first.")
-    st.stop()
-
+# -----------------------------
+# Load CSV safely
+# -----------------------------
 if not os.path.exists(CSV_PATH):
     st.error(f"Data file not found: {CSV_PATH}. SHAP analysis requires the training data.")
     st.stop()
 
 df = pd.read_csv(CSV_PATH)
 # Fill missing BMI
-df['bmi'].fillna(df['bmi'].median(), inplace=True)
+if 'bmi' in df.columns:
+    df['bmi'].fillna(df['bmi'].median(), inplace=True)
 
 # -----------------------------
 # Preprocess dataset to match training
 # -----------------------------
-categorical_cols = ['gender','ever_married','work_type','Residence_type','smoking_status']
-numeric_cols = ['age','avg_glucose_level','bmi','hypertension','heart_disease']
+categorical_cols = ['gender', 'ever_married', 'work_type', 'Residence_type', 'smoking_status']
+numeric_cols = ['age', 'avg_glucose_level', 'bmi', 'hypertension', 'heart_disease']
 
 # Select features used in training and one-hot encode
 X = pd.get_dummies(df[numeric_cols + categorical_cols], drop_first=True)
@@ -93,11 +106,11 @@ st.markdown("---")
 st.subheader("3. Individual Prediction SHAP Force Plot")
 st.caption("Select a data point to see which features push the prediction higher (red) or lower (blue) than the base value.")
 
-index = st.slider("Select observation index", 0, X_scaled.shape[0]-1, 0)
+index = st.slider("Select observation index", 0, X_scaled.shape[0] - 1, 0)
 shap.initjs()
 force_plot_html = shap.plots.force(
-    shap_values[index], 
-    matplotlib=False, 
+    shap_values[index],
+    matplotlib=False,
     feature_names=feature_order
 )
 st.components.v1.html(force_plot_html.html(), height=400)
