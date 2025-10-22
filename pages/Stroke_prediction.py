@@ -55,6 +55,7 @@ base_value = get_expected_value(explainer)
 # User Input
 # -----------------------------
 st.sidebar.header("Patient Information")
+
 def user_input_features():
     gender = st.sidebar.selectbox("Gender", ["Male", "Female", "Other"])
     age = st.sidebar.slider("Age", 0, 100, 50)
@@ -86,20 +87,19 @@ input_df = user_input_features()
 # -----------------------------
 # Preprocessing
 # -----------------------------
-# 1. One-hot encode the input
 X = pd.get_dummies(input_df, drop_first=True)
 
-# 2. Align features to the exact order the model expects
+# Ensure alignment with model features
 for col in feature_order:
     if col not in X.columns:
         X[col] = 0
 X = X[feature_order]
 
-# 3. Scale for model prediction
+# Scale input
 X_scaled = scaler.transform(X)
 
 # -----------------------------
-# Prediction
+# Prediction + SHAP
 # -----------------------------
 if st.button("Predict Stroke Risk", type="primary"):
     pred_proba = model.predict_proba(X_scaled)[:, 1][0]
@@ -111,47 +111,50 @@ if st.button("Predict Stroke Risk", type="primary"):
         st.success(f"🟢 Low Risk: Probability of Stroke is **{pred_proba:.2%}**")
 
     # -----------------------------
-    # SHAP explanation for this input
+    # SHAP explanation
     # -----------------------------
     st.markdown("### 🧪 SHAP Feature Interpretation")
 
-    shap_values_input = explainer.shap_values(X) 
-    if isinstance(shap_values_input, list):
-        shap_values_input = shap_values_input[1] # class 1 = stroke
+    shap_values_input = explainer.shap_values(X)
 
-    # Individual force plot (FIX IS HERE)
+    # ✅ Handle both binary and single-output models safely
+    if isinstance(shap_values_input, list):
+        if len(shap_values_input) > 1:
+            shap_values_input = shap_values_input[1]  # Class 1 (stroke)
+        else:
+            shap_values_input = shap_values_input[0]
+    
+    # -----------------------------
+    # Force Plot
+    # -----------------------------
     st.subheader("Individual Force Plot")
     shap.initjs()
-    # FIX: Convert the single row DataFrame to a 2D NumPy array for reliability
+
     force_plot = shap.plots.force(
-        base_value, 
+        base_value,
         shap_values_input[0],
-        X.iloc[0].values.reshape(1, -1), # FIX: Ensure 2D NumPy array
-        feature_names=feature_order, # Provide names since we are using a NumPy array
+        X.iloc[0].values.reshape(1, -1),  # ensure 2D
+        feature_names=feature_order,
         matplotlib=False
     )
     components.html(force_plot.html(), height=400)
-    
-    # Feature importance waterfall plot
+
+    # -----------------------------
+    # Waterfall Plot
+    # -----------------------------
     st.subheader("Feature Contribution (Waterfall Plot)")
     fig, ax = plt.subplots(figsize=(10, 5))
-    
-    # Create SHAP Explanation object
     shap_explanation = shap.Explanation(
         values=shap_values_input[0],
         base_values=base_value,
-        data=X.iloc[0].values, 
-        feature_names=feature_order 
+        data=X.iloc[0].values,
+        feature_names=feature_order
     )
-    
-    shap.plots.waterfall(
-        shap_explanation, 
-        show=False
-    )
+    shap.plots.waterfall(shap_explanation, show=False)
     st.pyplot(fig, clear_figure=True)
 
 # -----------------------------
-# Show input dataframe
+# Show Input DataFrame
 # -----------------------------
 with st.expander("Show Input Features"):
     st.dataframe(input_df.style.set_properties(**{'font-size': '10pt'}))

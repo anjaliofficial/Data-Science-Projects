@@ -73,14 +73,12 @@ if 'bmi' in df.columns:
     df['bmi'] = df['bmi'].fillna(df['bmi'].median())
 df = df.dropna()
 
-# One-hot encode and align features (Crucial step!)
+# One-hot encode and align features
 X = pd.get_dummies(df[numeric_cols + categorical_cols], drop_first=True)
 for col in feature_order:
     if col not in X.columns:
         X[col] = 0
-        
-# Reorder to match the model's expected feature list
-X = X[feature_order] 
+X = X[feature_order]  # ensure correct order
 
 
 # -----------------------------
@@ -97,15 +95,18 @@ base_value = get_expected_value(explainer)
 # -----------------------------
 # Compute SHAP values
 # -----------------------------
-# Use a subset for faster computation in the app, or use the whole set X
 sample_size = min(2000, len(X))
 X_sample = shap.sample(X, sample_size)
 
 with st.spinner(f"Computing SHAP values for {sample_size} samples..."):
-    # Use the one-hot encoded, aligned features (X_sample) for SHAP computation
-    shap_values_all = explainer.shap_values(X_sample) 
+    shap_values_all = explainer.shap_values(X_sample)
+
+    # ✅ Handle both binary and single-output models robustly
     if isinstance(shap_values_all, list):
-        shap_values = shap_values_all[1] # class 1 = stroke
+        if len(shap_values_all) > 1:
+            shap_values = shap_values_all[1]  # class 1 = stroke
+        else:
+            shap_values = shap_values_all[0]
     else:
         shap_values = shap_values_all
 
@@ -114,14 +115,14 @@ with st.spinner(f"Computing SHAP values for {sample_size} samples..."):
 # -----------------------------
 st.subheader("1️⃣ SHAP Summary Plot (Feature Impact & Direction)")
 fig, ax = plt.subplots(figsize=(12, 8))
-# Use X_sample for feature display names and values
-shap.summary_plot(shap_values, X_sample, show=False) 
+shap.summary_plot(shap_values, X_sample, show=False)
 st.pyplot(fig, clear_figure=True)
 
 st.subheader("2️⃣ Feature Importance (Mean |SHAP|)")
 fig2, ax2 = plt.subplots(figsize=(12, 6))
 shap.summary_plot(shap_values, X_sample, plot_type="bar", show=False)
 st.pyplot(fig2, clear_figure=True)
+
 
 # -----------------------------
 # Individual Prediction Exploration (Force Plot)
@@ -132,13 +133,12 @@ st.markdown("Select an index (from the **sampled** dataset) to view its individu
 
 index = st.slider("Select sample index", 0, len(X_sample)-1, 0)
 
-# FIX APPLIED: Force the features array into a 2D shape for SHAP compatibility
 shap.initjs()
 force_plot = shap.plots.force(
-    base_value, 
+    base_value,
     shap_values[index],
-    X_sample.iloc[index].values.reshape(1, -1), # FIX: Convert to 2D NumPy array
-    feature_names=feature_order, # Must provide feature names when passing a NumPy array
+    X_sample.iloc[index].values.reshape(1, -1),
+    feature_names=feature_order,
     matplotlib=False
 )
 components.html(force_plot.html(), height=300)
