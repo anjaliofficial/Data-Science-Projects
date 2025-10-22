@@ -5,7 +5,7 @@ import joblib
 import os
 import shap
 import matplotlib.pyplot as plt
-import streamlit.components.v1 as components # Import for the force plot
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Predict Stroke Risk", layout="centered")
 st.title("🔍 Predict Stroke Risk with SHAP Insights")
@@ -27,9 +27,8 @@ def get_expected_value(explainer):
     """Safely retrieves the base value (log-odds) for the positive class (index 1)."""
     ev = explainer.expected_value
     if isinstance(ev, np.ndarray):
-        # TreeExplainer for multi-class/binary classification returns an array
         if ev.ndim == 1 and ev.size >= 2:
-            return ev[1] # Log-odds for positive class (Stroke=1)
+            return ev[1]
         return ev[0]
     return ev
 
@@ -50,7 +49,7 @@ def load_artifacts():
         st.stop()
 
 model, scaler, feature_order, explainer = load_artifacts()
-base_value = get_expected_value(explainer) # Get base value once
+base_value = get_expected_value(explainer)
 
 # -----------------------------
 # User Input
@@ -80,7 +79,6 @@ def user_input_features():
         "bmi": bmi,
         "smoking_status": smoking_status
     }
-    # Create a DataFrame with a single row
     return pd.DataFrame([data])
 
 input_df = user_input_features()
@@ -97,7 +95,7 @@ for col in feature_order:
         X[col] = 0
 X = X[feature_order]
 
-# 3. Scale for model prediction (only numerical features were scaled by StandardScaler)
+# 3. Scale for model prediction
 X_scaled = scaler.transform(X)
 
 # -----------------------------
@@ -117,8 +115,6 @@ if st.button("Predict Stroke Risk", type="primary"):
     # -----------------------------
     st.markdown("### 🧪 SHAP Feature Interpretation")
 
-    # Use the unscaled, one-hot encoded X for SHAP value calculation
-    # X is a DataFrame with exactly one row and feature_order columns
     shap_values_input = explainer.shap_values(X) 
     if isinstance(shap_values_input, list):
         shap_values_input = shap_values_input[1] # class 1 = stroke
@@ -126,10 +122,12 @@ if st.button("Predict Stroke Risk", type="primary"):
     # Individual force plot (FIX IS HERE)
     st.subheader("Individual Force Plot")
     shap.initjs()
+    # FIX: Convert the single row DataFrame to a 2D NumPy array for reliability
     force_plot = shap.plots.force(
         base_value, 
         shap_values_input[0],
-        X.iloc[[0]], # FIX: Pass the single-row DataFrame using .iloc[[0]] to ensure 2D structure
+        X.iloc[0].values.reshape(1, -1), # FIX: Ensure 2D NumPy array
+        feature_names=feature_order, # Provide names since we are using a NumPy array
         matplotlib=False
     )
     components.html(force_plot.html(), height=400)
@@ -157,4 +155,3 @@ if st.button("Predict Stroke Risk", type="primary"):
 # -----------------------------
 with st.expander("Show Input Features"):
     st.dataframe(input_df.style.set_properties(**{'font-size': '10pt'}))
-    st.markdown("**Note:** This is the raw input. The model uses the one-hot encoded and scaled version.")
