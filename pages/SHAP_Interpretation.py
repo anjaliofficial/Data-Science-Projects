@@ -5,7 +5,7 @@ import joblib
 import shap
 import matplotlib.pyplot as plt
 import os
-import streamlit.components.v1 as components # Import for the force plot
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="🧪 SHAP Feature Interpretation", layout="wide")
 st.title("🧪 SHAP Feature Interpretation (Global Analysis)")
@@ -26,7 +26,7 @@ FEATURES_PATH = os.path.join(MODEL_DIR, "feature_names.pkl")
 CSV_PATH = os.path.join(DATA_DIR, "stroke_cleaned.csv")
 
 # -----------------------------
-# Helper Function for SHAP Base Value (FIX for IndexError)
+# Helper Function for SHAP Base Value
 # -----------------------------
 def get_expected_value(explainer):
     """Safely retrieves the base value (log-odds) for the positive class (index 1)."""
@@ -46,7 +46,6 @@ def get_expected_value(explainer):
 def load_artifacts():
     try:
         model = joblib.load(MODEL_PATH)
-        # scaler is not strictly needed for SHAP on tree models, but loaded for consistency
         scaler = joblib.load(SCALER_PATH) 
         feature_order = joblib.load(FEATURES_PATH)
         return model, scaler, feature_order
@@ -81,7 +80,10 @@ X = pd.get_dummies(df[numeric_cols + categorical_cols], drop_first=True)
 for col in feature_order:
     if col not in X.columns:
         X[col] = 0
-X = X[feature_column] # Reorder to match the model's expected feature list
+        
+# FIX APPLIED HERE: Used 'feature_order' instead of 'feature_column'
+X = X[feature_order] # Reorder to match the model's expected feature list
+
 
 # -----------------------------
 # SHAP Explainer
@@ -102,7 +104,7 @@ sample_size = min(2000, len(X))
 X_sample = shap.sample(X, sample_size)
 
 with st.spinner(f"Computing SHAP values for {sample_size} samples..."):
-    # Use the one-hot encoded, aligned features (X) for SHAP computation
+    # Use the one-hot encoded, aligned features (X_sample) for SHAP computation
     shap_values_all = explainer.shap_values(X_sample) 
     if isinstance(shap_values_all, list):
         shap_values = shap_values_all[1] # class 1 = stroke
@@ -133,12 +135,12 @@ st.markdown("Select an index (from the **sampled** dataset) to view its individu
 # Map slider index to the actual index in X_sample
 index = st.slider("Select sample index", 0, len(X_sample)-1, 0)
 
-# FIX: Use the safely derived base_value and ensure features is 2D (X_sample.iloc[[index]])
+# FIX: Ensure features is 2D (X_sample.iloc[[index]])
 shap.initjs()
 force_plot = shap.plots.force(
     base_value, 
     shap_values[index],
-    X_sample.iloc[[index]], # FIX: Pass the single-row DataFrame (2D structure)
+    X_sample.iloc[[index]], # Pass the single-row DataFrame (2D structure)
     matplotlib=False
 )
 components.html(force_plot.html(), height=300)
