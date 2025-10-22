@@ -81,8 +81,8 @@ for col in feature_order:
     if col not in X.columns:
         X[col] = 0
         
-# FIX APPLIED HERE: Used 'feature_order' instead of 'feature_column'
-X = X[feature_order] # Reorder to match the model's expected feature list
+# Reorder to match the model's expected feature list
+X = X[feature_order] 
 
 
 # -----------------------------
@@ -135,14 +135,15 @@ st.markdown("Select an index (from the **sampled** dataset) to view its individu
 # Map slider index to the actual index in X_sample
 index = st.slider("Select sample index", 0, len(X_sample)-1, 0)
 
-# FIX: Ensure features is 2D (X_sample.iloc[[index]])
+# FIX APPLIED HERE: Pass the features as a NumPy array with an explicit (1, -1) shape.
 shap.initjs()
 force_plot = shap.plots.force(
     base_value, 
     shap_values[index],
-    X_sample.iloc[[index]], # Pass the single-row DataFrame (2D structure)
+    X_sample.iloc[index].values.reshape(1, -1), # FIX: Convert the single row to a 2D NumPy array
+    feature_names=feature_order, # Provide feature names when passing a NumPy array
     matplotlib=False
 )
 components.html(force_plot.html(), height=300)
 
-st.success(f"✅ SHAP analysis loaded successfully using {sample_size} samples!")
+st.success(f"✅ SHAP analysis loaded successfully using {sample_size} samples! Remember to improve your model's Class 1 Recall.")
