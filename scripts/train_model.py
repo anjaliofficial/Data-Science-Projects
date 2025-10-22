@@ -9,7 +9,6 @@ import joblib
 # ---------------------------------------------
 # STEP 1: Define paths
 # ---------------------------------------------
-# Assuming this script is in 'scripts/' and data/models are sibling directories to 'scripts'
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.join(BASE_DIR, "..")
 DATA_DIR = os.path.join(ROOT_DIR, "data")
@@ -18,7 +17,6 @@ MODEL_DIR = os.path.join(ROOT_DIR, "models")
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-# NOTE: Ensure you have 'stroke_data.csv' in the 'data' directory
 CLEAN_FILE = os.path.join(DATA_DIR, "stroke_cleaned.csv")
 RAW_FILE = os.path.join(DATA_DIR, "stroke_data.csv")
 
@@ -36,16 +34,17 @@ def clean_data():
     df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
     df.drop_duplicates(inplace=True)
 
+    # Robustly drop ID columns
     drop_cols = [col for col in ["id", "patient_id"] if col in df.columns]
     df.drop(columns=drop_cols, inplace=True, errors="ignore")
 
-    # Handle Missing BMI (Imputation must match app logic)
+    # Handle Missing BMI
     if "bmi" in df.columns:
         df["bmi"] = df["bmi"].fillna(df["bmi"].median())
 
-    # Drop 'Other' gender and any remaining NaNs (must match app logic)
+    # Drop 'Other' gender and any remaining NaNs
     if 'gender' in df.columns:
-        df = df[df['gender'] != 'other']
+        df = df[df['gender'].str.lower() != 'other']
     
     df = df.dropna()
 
