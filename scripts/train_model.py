@@ -1,5 +1,3 @@
-# scripts/train_model.py
-
 import os
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -11,6 +9,7 @@ import joblib
 # ---------------------------------------------
 # STEP 1: Define paths
 # ---------------------------------------------
+# Assuming this script is in 'scripts/' and data/models are sibling directories to 'scripts'
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.join(BASE_DIR, "..")
 DATA_DIR = os.path.join(ROOT_DIR, "data")
@@ -19,6 +18,7 @@ MODEL_DIR = os.path.join(ROOT_DIR, "models")
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(MODEL_DIR, exist_ok=True)
 
+# NOTE: Ensure you have 'stroke_data.csv' in the 'data' directory
 CLEAN_FILE = os.path.join(DATA_DIR, "stroke_cleaned.csv")
 RAW_FILE = os.path.join(DATA_DIR, "stroke_data.csv")
 
@@ -39,13 +39,13 @@ def clean_data():
     drop_cols = [col for col in ["id", "patient_id"] if col in df.columns]
     df.drop(columns=drop_cols, inplace=True, errors="ignore")
 
-    # Handle Missing BMI
+    # Handle Missing BMI (Imputation must match app logic)
     if "bmi" in df.columns:
         df["bmi"] = df["bmi"].fillna(df["bmi"].median())
 
-    # Drop 'Other' gender and any remaining NaNs
+    # Drop 'Other' gender and any remaining NaNs (must match app logic)
     if 'gender' in df.columns:
-        df = df[df['gender'] != 'Other']
+        df = df[df['gender'] != 'other']
     
     df = df.dropna()
 
@@ -74,6 +74,7 @@ if target_column not in df.columns:
 
 categorical_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
 
+# Crucial for consistency: drop_first=True
 df_encoded = pd.get_dummies(df, columns=categorical_cols, drop_first=True)
 
 X = df_encoded.drop(target_column, axis=1)
@@ -120,7 +121,7 @@ feature_names_path = os.path.join(MODEL_DIR, "feature_names.pkl")
 
 joblib.dump(model, model_path)
 joblib.dump(scaler, scaler_path)
-joblib.dump(X.columns.tolist(), feature_names_path)
+joblib.dump(X.columns.tolist(), feature_names_path) # Save the EXACT feature order
 
 print(f"\n✅ Model saved successfully: {model_path}")
 print(f"✅ Scaler saved: {scaler_path}")
