@@ -32,9 +32,8 @@ def get_expected_value(explainer):
     """Safely retrieves the base value (log-odds) for the positive class (index 1)."""
     ev = explainer.expected_value
     if isinstance(ev, np.ndarray):
-        # TreeExplainer for multi-class/binary classification returns an array
         if ev.ndim == 1 and ev.size >= 2:
-            return ev[1] # Log-odds for positive class (Stroke=1)
+            return ev[1]
         return ev[0]
     return ev
 
@@ -66,7 +65,6 @@ if not os.path.exists(CSV_PATH):
 df = pd.read_csv(CSV_PATH)
 df.columns = df.columns.str.lower().str.strip()
 
-# Columns must match those used in train_model.py
 categorical_cols = ['gender', 'ever_married', 'work_type', 'residence_type', 'smoking_status']
 numeric_cols = ['age', 'avg_glucose_level', 'bmi', 'hypertension', 'heart_disease']
 
@@ -132,16 +130,15 @@ st.markdown("---")
 st.subheader("3️⃣ Individual Prediction Force Plot Exploration")
 st.markdown("Select an index (from the **sampled** dataset) to view its individual feature contributions.")
 
-# Map slider index to the actual index in X_sample
 index = st.slider("Select sample index", 0, len(X_sample)-1, 0)
 
-# FIX APPLIED HERE: Pass the features as a NumPy array with an explicit (1, -1) shape.
+# FIX APPLIED: Force the features array into a 2D shape for SHAP compatibility
 shap.initjs()
 force_plot = shap.plots.force(
     base_value, 
     shap_values[index],
-    X_sample.iloc[index].values.reshape(1, -1), # FIX: Convert the single row to a 2D NumPy array
-    feature_names=feature_order, # Provide feature names when passing a NumPy array
+    X_sample.iloc[index].values.reshape(1, -1), # FIX: Convert to 2D NumPy array
+    feature_names=feature_order, # Must provide feature names when passing a NumPy array
     matplotlib=False
 )
 components.html(force_plot.html(), height=300)

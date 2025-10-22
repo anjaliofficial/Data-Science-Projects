@@ -140,8 +140,8 @@ if st.button("Predict Stroke Risk", type="primary"):
     shap_explanation = shap.Explanation(
         values=shap_values_input[0],
         base_values=base_value,
-        data=X.iloc[0].values, # Data as a 1D array
-        feature_names=feature_order # Feature names for display
+        data=X.iloc[0].values, 
+        feature_names=feature_order 
     )
     
     shap.plots.waterfall(
