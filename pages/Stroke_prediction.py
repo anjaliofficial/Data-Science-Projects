@@ -21,7 +21,7 @@ SCALER_PATH = os.path.join(MODEL_DIR, "scaler.pkl")
 FEATURES_PATH = os.path.join(MODEL_DIR, "feature_names.pkl")
 
 # -----------------------------
-# Helper Function for SHAP Base Value (FIX for IndexError)
+# Helper Function for SHAP Base Value
 # -----------------------------
 def get_expected_value(explainer):
     """Safely retrieves the base value (log-odds) for the positive class (index 1)."""
@@ -80,6 +80,7 @@ def user_input_features():
         "bmi": bmi,
         "smoking_status": smoking_status
     }
+    # Create a DataFrame with a single row
     return pd.DataFrame([data])
 
 input_df = user_input_features()
@@ -112,7 +113,7 @@ if st.button("Predict Stroke Risk", type="primary"):
         st.success(f"🟢 Low Risk: Probability of Stroke is **{pred_proba:.2%}**")
 
     # -----------------------------
-    # SHAP explanation for this input (FIXES APPLIED HERE)
+    # SHAP explanation for this input
     # -----------------------------
     st.markdown("### 🧪 SHAP Feature Interpretation")
 
@@ -122,13 +123,13 @@ if st.button("Predict Stroke Risk", type="primary"):
     if isinstance(shap_values_input, list):
         shap_values_input = shap_values_input[1] # class 1 = stroke
 
-    # Individual force plot
+    # Individual force plot (FIX IS HERE)
     st.subheader("Individual Force Plot")
     shap.initjs()
     force_plot = shap.plots.force(
         base_value, 
         shap_values_input[0],
-        X.iloc[[0]], # FIX: Pass the single-row DataFrame (2D structure)
+        X.iloc[[0]], # FIX: Pass the single-row DataFrame using .iloc[[0]] to ensure 2D structure
         matplotlib=False
     )
     components.html(force_plot.html(), height=400)
@@ -137,7 +138,7 @@ if st.button("Predict Stroke Risk", type="primary"):
     st.subheader("Feature Contribution (Waterfall Plot)")
     fig, ax = plt.subplots(figsize=(10, 5))
     
-    # Ensure all components of the Explanation object are correct for the waterfall plot
+    # Create SHAP Explanation object
     shap_explanation = shap.Explanation(
         values=shap_values_input[0],
         base_values=base_value,
