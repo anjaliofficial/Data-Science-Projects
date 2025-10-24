@@ -13,9 +13,9 @@ st.title("🔍 Predict Stroke Risk with SHAP Insights")
 # -----------------------------
 # Paths
 # -----------------------------
-# Ensure the model directory structure is correct relative to this page file
+# The path must be relative to the location of this script (pages/stroke_prediction.py)
 BASE_DIR = os.path.dirname(__file__)
-MODEL_DIR = os.path.join(BASE_DIR, "..", "models")
+MODEL_DIR = os.path.join(BASE_DIR, "..", "models") # Go up one level (..) then into models
 
 MODEL_PATH = os.path.join(MODEL_DIR, "stroke_model.pkl")
 SCALER_PATH = os.path.join(MODEL_DIR, "scaler.pkl")
@@ -28,12 +28,12 @@ def get_expected_value(explainer):
     """Safely retrieves the base value (log-odds) for the positive class (index 1)."""
     ev = explainer.expected_value
     if isinstance(ev, np.ndarray):
-        # For binary classification, use the base value for the positive class (index 1)
+        # For binary classification (most common TreeExplainer output)
         if ev.ndim == 1 and ev.size >= 2:
-            return ev[1]
-        # For single-output models (e.g., probability prediction without log-odds), use the single value
+            return ev[1]  # Return the base value for the positive class (stroke=1)
+        # For single-output models
         if ev.ndim == 0 or ev.size == 1:
-            return ev.item()
+            return ev.item() if isinstance(ev, np.ndarray) else ev
     return ev
 
 
@@ -46,11 +46,11 @@ def load_artifacts():
         model = joblib.load(MODEL_PATH)
         scaler = joblib.load(SCALER_PATH)
         feature_order = joblib.load(FEATURES_PATH)
-        # Use a model-specific explainer (TreeExplainer for RF, XGBoost, etc.)
-        explainer = shap.TreeExplainer(model) 
+        # TreeExplainer is fast and specific for Random Forest
+        explainer = shap.TreeExplainer(model)
         return model, scaler, feature_order, explainer
     except Exception as e:
-        st.error(f"❌ Error loading artifacts. Please ensure 'scripts/train_model.py' has been run successfully and the model files exist in the 'models/' folder. Error: {e}")
+        st.error(f"❌ Error loading artifacts. Please ensure 'train_model.py' has been run successfully and the model files exist in the 'models/' folder. Error: {e}")
         st.stop()
 
 model, scaler, feature_order, explainer = load_artifacts()
@@ -62,17 +62,15 @@ base_value = get_expected_value(explainer)
 st.sidebar.header("Patient Information")
 
 def user_input_features():
-    # Note: 'Other' gender will be dropped by the cleaning/encoding logic, matching the training data.
     gender = st.sidebar.selectbox("Gender", ["Male", "Female", "Other"])
-    age = st.sidebar.slider("Age", 0.0, 100.0, 50.0) # Changed to float for consistency
+    age = st.sidebar.slider("Age", 0.0, 100.0, 50.0) 
     hypertension = st.sidebar.selectbox("Hypertension (0=No, 1=Yes)", [0, 1])
     heart_disease = st.sidebar.selectbox("Heart Disease (0=No, 1=Yes)", [0, 1])
     ever_married = st.sidebar.selectbox("Ever Married", ["Yes", "No"])
-    work_type = st.sidebar.selectbox("Work Type", ["Private", "Self-employed", "Govt_job", "children", "Never_worked"]) # Corrected 'Children' to 'children' based on common dataset
+    work_type = st.sidebar.selectbox("Work Type", ["Private", "Self-employed", "Govt_job", "children", "Never_worked"])
     residence_type = st.sidebar.selectbox("Residence Type", ["Urban", "Rural"])
     avg_glucose_level = st.sidebar.number_input("Average Glucose Level", 50.0, 300.0, 100.0)
     bmi = st.sidebar.number_input("BMI", 10.0, 60.0, 25.0)
-    # Corrected 'Unknown' case to match how one-hot encoding works
     smoking_status = st.sidebar.selectbox("Smoking Status", ["formerly smoked", "never smoked", "smokes", "Unknown"])
     
     data = {
@@ -92,31 +90,35 @@ def user_input_features():
 input_df = user_input_features()
 
 # -----------------------------
-# Preprocessing
+# Preprocessing (Mimic Training Pipeline)
 # -----------------------------
-# Remove 'Other' gender if present, to match training data
-if 'gender' in input_df.columns and 'Other' in input_df['gender'].values:
-    input_df = input_df[input_df['gender'] != 'Other']
 
-X = pd.get_dummies(input_df, drop_first=True)
+# 1. Drop 'Other' gender to match training data
+X_raw = input_df[input_df['gender'] != 'Other']
 
-# Align columns with model features (critical step)
+# 2. One-Hot Encode (OHE)
+categorical_cols = X_raw.select_dtypes(include=["object"]).columns.tolist()
+X_encoded = pd.get_dummies(X_raw, columns=categorical_cols, drop_first=True)
+
+# 3. Align Columns (Critical Step for OHE consistency)
 X_aligned = pd.DataFrame(columns=feature_order)
 for col in feature_order:
-    X_aligned[col] = X.get(col, 0)
+    # Use .get() to insert 0 if the feature (e.g., a specific OHE column) is missing
+    X_aligned[col] = X_encoded.get(col, [0]) 
 
-# Scale input
+if X_aligned.empty:
+    st.warning("Input resulted in no valid data points (e.g., 'Other' gender selected). Please check your inputs.")
+    st.stop()
+
+# 4. Scale Input
 X_scaled = scaler.transform(X_aligned)
 
 # -----------------------------
-# Prediction + SHAP
+# Prediction & Visualization
 # -----------------------------
 if st.button("Predict Stroke Risk", type="primary"):
     
-    if X_aligned.empty:
-        st.error("Cannot predict: Invalid input (e.g., 'Other' gender selected). Please check your inputs.")
-        st.stop()
-
+    # Calculate probability for class 1 (Stroke)
     pred_proba = model.predict_proba(X_scaled)[:, 1][0]
     st.subheader("Prediction Result")
     
@@ -130,38 +132,38 @@ if st.button("Predict Stroke Risk", type="primary"):
     # -----------------------------
     st.markdown("### 🧪 SHAP Feature Interpretation")
 
-    # Use the unscaled, aligned, and encoded DataFrame X_aligned for SHAP calculation
+    # Use the unscaled, aligned DataFrame X_aligned for SHAP calculation
     shap_values = explainer.shap_values(X_aligned)
 
-    # Handle both list output (binary classification) and single array output
-    if isinstance(shap_values, list):
-        if len(shap_values) > 1:
-            shap_values_input = shap_values[1]  # Class 1 (stroke)
-        else:
-            shap_values_input = shap_values[0]
+    # Extract SHAP values for the positive class (index 1)
+    if isinstance(shap_values, list) and len(shap_values) > 1:
+        shap_values_input = shap_values[1]  # Class 1 (stroke)
+    elif isinstance(shap_values, list) and len(shap_values) == 1:
+        shap_values_input = shap_values[0] # Single output model
     else:
-        shap_values_input = shap_values
-    
-    # SHAP values for a single point are now a (1, N) 2D array
-    
+        shap_values_input = shap_values # Single array output
+
     # -----------------------------
-    # Force Plot
+    # Force Plot (CRITICALLY FIXED)
     # -----------------------------
     st.subheader("Individual Force Plot")
     shap.initjs()
 
-    # THE CRITICAL CORRECTION: Use shap_values_input[0] (1D vector) and X_aligned.iloc[0].values (1D vector)
+    # The fix: access the first (and only) row's values (index [0])
+    # This transforms the (1, N) array into a 1D vector (N)
+    
     force_plot = shap.plots.force(
         base_value,
-        shap_values_input[0],           # SHAP values for the single instance (1D)
-        X_aligned.iloc[0].values,       # Feature values for the single instance (1D)
+        shap_values_input[0],           # SHAP values for the single instance (1D vector)
+        X_aligned.iloc[0].values,       # Feature values for the single instance (1D vector)
         feature_names=feature_order,
         matplotlib=False
     )
+    # Render the plot in Streamlit
     components.html(force_plot.html(), height=400)
 
     # -----------------------------
-    # Waterfall Plot
+    # Waterfall Plot (Also uses 1D vectors)
     # -----------------------------
     st.subheader("Feature Contribution (Waterfall Plot)")
     fig, ax = plt.subplots(figsize=(10, 5))
@@ -172,10 +174,12 @@ if st.button("Predict Stroke Risk", type="primary"):
         feature_names=feature_order
     )
     shap.plots.waterfall(shap_explanation, show=False)
+    # Increase layout tightness to ensure all labels fit
+    plt.tight_layout()
     st.pyplot(fig, clear_figure=True)
-
+    
 # -----------------------------
 # Show Input DataFrame
 # -----------------------------
-with st.expander("Show Encoded Input Features"):
+with st.expander("Show Encoded and Aligned Input Features (What the model sees)"):
     st.dataframe(X_aligned.style.set_properties(**{'font-size': '10pt'}))
