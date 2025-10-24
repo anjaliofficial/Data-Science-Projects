@@ -13,9 +13,10 @@ st.title("🔍 Predict Stroke Risk with SHAP Insights")
 # -----------------------------
 # Paths
 # -----------------------------
-# The path must be relative to the location of this script (pages/stroke_prediction.py)
+# The path must be relative to the location of this script (pages/SHAP_Interpretation.py)
 BASE_DIR = os.path.dirname(__file__)
-MODEL_DIR = os.path.join(BASE_DIR, "..", "models") # Go up one level (..) then into models
+# Go up one level (..) from 'pages' then into 'models'
+MODEL_DIR = os.path.join(BASE_DIR, "..", "models") 
 
 MODEL_PATH = os.path.join(MODEL_DIR, "stroke_model.pkl")
 SCALER_PATH = os.path.join(MODEL_DIR, "scaler.pkl")
@@ -47,10 +48,11 @@ def load_artifacts():
         scaler = joblib.load(SCALER_PATH)
         feature_order = joblib.load(FEATURES_PATH)
         # TreeExplainer is fast and specific for Random Forest
-        explainer = shap.TreeExplainer(model)
+        explainer = shap.TreeExplainer(model) 
         return model, scaler, feature_order, explainer
     except Exception as e:
         st.error(f"❌ Error loading artifacts. Please ensure 'train_model.py' has been run successfully and the model files exist in the 'models/' folder. Error: {e}")
+        # Use a Streamlit stop instead of sys.exit()
         st.stop()
 
 model, scaler, feature_order, explainer = load_artifacts()
@@ -107,7 +109,9 @@ for col in feature_order:
     X_aligned[col] = X_encoded.get(col, [0]) 
 
 if X_aligned.empty:
-    st.warning("Input resulted in no valid data points (e.g., 'Other' gender selected). Please check your inputs.")
+    # If the only input was 'Other' gender, the DataFrame will be empty
+    st.info("Please select a valid gender (Male or Female) to continue the prediction.")
+    # Exit the script execution flow cleanly
     st.stop()
 
 # 4. Scale Input
@@ -144,13 +148,13 @@ if st.button("Predict Stroke Risk", type="primary"):
         shap_values_input = shap_values # Single array output
 
     # -----------------------------
-    # Force Plot (CRITICALLY FIXED)
+    # Force Plot (FIXED)
     # -----------------------------
     st.subheader("Individual Force Plot")
     shap.initjs()
 
-    # The fix: access the first (and only) row's values (index [0])
-    # This transforms the (1, N) array into a 1D vector (N)
+    # THE CRITICAL FIX: The Force plot expects 1D arrays for the values/features for a single point.
+    # We use [0] to flatten the (1, N) array into an (N,) vector.
     
     force_plot = shap.plots.force(
         base_value,

@@ -10,18 +10,20 @@ import numpy as np
 # ---------------------------------------------
 # STEP 1: Define paths and setup directories
 # ---------------------------------------------
-# Define paths relative to the script's location (assuming a standard project structure)
+# Define paths relative to the script's location (assuming the script is in 'scripts/')
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Note: Assuming this script is run from the root of the project, adjust paths if necessary.
-DATA_DIR = os.path.join(BASE_DIR, "data")
-MODEL_DIR = os.path.join(BASE_DIR, "models")
+# Data and Model directories are now defined one level up from the script's location,
+# to match your project structure: PROJECT_ROOT/data/ and PROJECT_ROOT/models/
+PROJECT_ROOT = os.path.join(BASE_DIR, "..")
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+MODEL_DIR = os.path.join(PROJECT_ROOT, "models")
 
 # Create directories if they don't exist
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 CLEAN_FILE = os.path.join(DATA_DIR, "stroke_cleaned.csv")
-RAW_FILE = os.path.join(DATA_DIR, "stroke_data.csv") # Assuming raw file is here
+RAW_FILE = os.path.join(DATA_DIR, "stroke_data.csv") # Path: PROJECT_ROOT/data/stroke_data.csv
 
 # ---------------------------------------------
 # STEP 2: Clean raw dataset
@@ -31,18 +33,10 @@ def clean_data():
     
     print(f"Attempting to load raw data from: {RAW_FILE}")
     if not os.path.exists(RAW_FILE):
-        # IMPORTANT: This placeholder is for the environment where the user uploads the file.
-        # If running locally, make sure 'stroke_data.csv' is in the 'data' folder.
-        print("NOTE: Using uploaded file content directly.")
-        # Load the uploaded file content (assuming it's available in the execution environment)
-        # In a real environment, you'd handle the file upload path here.
-        # For this execution, we assume the file is named 'stroke_data.csv'
-        try:
-             df = pd.read_csv("stroke_data.csv")
-        except FileNotFoundError:
-             raise FileNotFoundError(f"❌ Cannot find {RAW_FILE}. Please place stroke_data.csv inside 'data/' folder or ensure it is uploaded.")
+        # Raising the error immediately if the file is not found at the expected path.
+        raise FileNotFoundError(f"❌ Cannot find {RAW_FILE}. Please place stroke_data.csv inside the **'data/'** folder in your project root.")
 
-
+    # --- FIX APPLIED HERE: Use the explicit RAW_FILE path ---
     df = pd.read_csv(RAW_FILE)
     print(f"✅ Loaded raw data: {df.shape}")
 
