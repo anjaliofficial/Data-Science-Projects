@@ -13,7 +13,7 @@ st.title("🔍 Predict Stroke Risk with SHAP Insights")
 # -----------------------------
 # Paths
 # -----------------------------
-# The path must be relative to the location of this script (pages/SHAP_Interpretation.py)
+# The path must be relative to the location of this script (e.g., pages/...)
 BASE_DIR = os.path.dirname(__file__)
 # Go up one level (..) from 'pages' then into 'models'
 MODEL_DIR = os.path.join(BASE_DIR, "..", "models") 
@@ -52,7 +52,6 @@ def load_artifacts():
         return model, scaler, feature_order, explainer
     except Exception as e:
         st.error(f"❌ Error loading artifacts. Please ensure 'train_model.py' has been run successfully and the model files exist in the 'models/' folder. Error: {e}")
-        # Use a Streamlit stop instead of sys.exit()
         st.stop()
 
 model, scaler, feature_order, explainer = load_artifacts()
@@ -109,9 +108,7 @@ for col in feature_order:
     X_aligned[col] = X_encoded.get(col, [0]) 
 
 if X_aligned.empty:
-    # If the only input was 'Other' gender, the DataFrame will be empty
     st.info("Please select a valid gender (Male or Female) to continue the prediction.")
-    # Exit the script execution flow cleanly
     st.stop()
 
 # 4. Scale Input
@@ -137,15 +134,26 @@ if st.button("Predict Stroke Risk", type="primary"):
     st.markdown("### 🧪 SHAP Feature Interpretation")
 
     # Use the unscaled, aligned DataFrame X_aligned for SHAP calculation
-    shap_values = explainer.shap_values(X_aligned)
+    # NOTE: This will return a list of two (1, N) arrays for binary classification
+    shap_values_list = explainer.shap_values(X_aligned)
 
     # Extract SHAP values for the positive class (index 1)
-    if isinstance(shap_values, list) and len(shap_values) > 1:
-        shap_values_input = shap_values[1]  # Class 1 (stroke)
-    elif isinstance(shap_values, list) and len(shap_values) == 1:
-        shap_values_input = shap_values[0] # Single output model
+    if isinstance(shap_values_list, list) and len(shap_values_list) > 1:
+        shap_values_pos_class = shap_values_list[1] # Class 1 (stroke) - SHAPE: (1, N)
     else:
-        shap_values_input = shap_values # Single array output
+        shap_values_pos_class = shap_values_list # Single output model - SHAPE: (1, N)
+
+    # -----------------------------
+    # SHAP Explanation Object (FIX)
+    # -----------------------------
+    # Create a proper SHAP Explanation object for the single instance
+    # This is the safest way to pass data to SHAP plotting functions.
+    single_instance_explanation = shap.Explanation(
+        values=shap_values_pos_class[0], # 1D SHAP values
+        base_values=base_value,
+        data=X_aligned.iloc[0].values, # 1D feature values
+        feature_names=feature_order
+    )
 
     # -----------------------------
     # Force Plot (FIXED)
@@ -153,14 +161,9 @@ if st.button("Predict Stroke Risk", type="primary"):
     st.subheader("Individual Force Plot")
     shap.initjs()
 
-    # THE CRITICAL FIX: The Force plot expects 1D arrays for the values/features for a single point.
-    # We use [0] to flatten the (1, N) array into an (N,) vector.
-    
+    # Pass the complete Explanation object to the force plot
     force_plot = shap.plots.force(
-        base_value,
-        shap_values_input[0],           # SHAP values for the single instance (1D vector)
-        X_aligned.iloc[0].values,       # Feature values for the single instance (1D vector)
-        feature_names=feature_order,
+        single_instance_explanation,
         matplotlib=False
     )
     # Render the plot in Streamlit
@@ -171,14 +174,10 @@ if st.button("Predict Stroke Risk", type="primary"):
     # -----------------------------
     st.subheader("Feature Contribution (Waterfall Plot)")
     fig, ax = plt.subplots(figsize=(10, 5))
-    shap_explanation = shap.Explanation(
-        values=shap_values_input[0],
-        base_values=base_value,
-        data=X_aligned.iloc[0].values,
-        feature_names=feature_order
-    )
-    shap.plots.waterfall(shap_explanation, show=False)
-    # Increase layout tightness to ensure all labels fit
+    
+    # Use the existing Explanation object
+    shap.plots.waterfall(single_instance_explanation, show=False)
+    
     plt.tight_layout()
     st.pyplot(fig, clear_figure=True)
     

@@ -2,145 +2,114 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
+import os
 import shap
 import matplotlib.pyplot as plt
-import os
 import streamlit.components.v1 as components
 
-st.set_page_config(page_title="🧪 SHAP Feature Interpretation", layout="wide")
-st.title("🧪 SHAP Feature Interpretation (Global Analysis)")
-st.markdown("""
-Understand how the model makes predictions by analyzing **feature contributions** using SHAP values across the entire dataset.
-""")
+st.set_page_config(page_title="🔍 Predict Stroke Risk with SHAP Insights", layout="wide")
+st.title("🔍 Predict Stroke Risk with SHAP Insights")
 
 # -----------------------------
 # Paths
 # -----------------------------
 BASE_DIR = os.path.dirname(__file__)
-MODEL_DIR = os.path.join(BASE_DIR, "..", "models")
-DATA_DIR = os.path.join(BASE_DIR, "..", "data")
-
-MODEL_PATH = os.path.join(MODEL_DIR, "stroke_model.pkl")
-SCALER_PATH = os.path.join(MODEL_DIR, "scaler.pkl")
-FEATURES_PATH = os.path.join(MODEL_DIR, "feature_names.pkl")
-CSV_PATH = os.path.join(DATA_DIR, "stroke_cleaned.csv")
+DATA_PATH = os.path.join(BASE_DIR, "../data/stroke_cleaned.csv")
+MODEL_PATH = os.path.join(BASE_DIR, "../models/stroke_model.pkl")
 
 # -----------------------------
-# Helper Function for SHAP Base Value
+# Load data and model
 # -----------------------------
-def get_expected_value(explainer):
-    """Safely retrieves the base value (log-odds) for the positive class (index 1)."""
-    ev = explainer.expected_value
-    if isinstance(ev, np.ndarray):
-        if ev.ndim == 1 and ev.size >= 2:
-            return ev[1]
-        return ev[0]
-    return ev
+st.subheader("📊 Data Preview")
 
-
-# -----------------------------
-# Load Model and Artifacts
-# -----------------------------
-@st.cache_resource
-def load_artifacts():
-    try:
-        model = joblib.load(MODEL_PATH)
-        scaler = joblib.load(SCALER_PATH) 
-        feature_order = joblib.load(FEATURES_PATH)
-        return model, scaler, feature_order
-    except Exception as e:
-        st.error(f"❌ Error loading model artifacts. Please ensure 'scripts/train_model.py' has been run successfully: {e}")
-        st.stop()
-
-model, scaler, feature_order = load_artifacts()
-
-
-# -----------------------------
-# Load Data & Preprocessing
-# -----------------------------
-if not os.path.exists(CSV_PATH):
-    st.error(f"❌ Data file not found: {CSV_PATH}. Please run 'scripts/train_model.py' to generate it.")
+try:
+    df = pd.read_csv(DATA_PATH)
+    st.dataframe(df.head())
+except FileNotFoundError:
+    st.error("❌ stroke_cleaned.csv not found. Please check your /data folder.")
     st.stop()
 
-df = pd.read_csv(CSV_PATH)
-df.columns = df.columns.str.lower().str.strip()
-
-categorical_cols = ['gender', 'ever_married', 'work_type', 'residence_type', 'smoking_status']
-numeric_cols = ['age', 'avg_glucose_level', 'bmi', 'hypertension', 'heart_disease']
-
-# Data Cleaning (must match train_model.py)
-if 'bmi' in df.columns:
-    df['bmi'] = df['bmi'].fillna(df['bmi'].median())
-df = df.dropna()
-
-# One-hot encode and align features
-X = pd.get_dummies(df[numeric_cols + categorical_cols], drop_first=True)
-for col in feature_order:
-    if col not in X.columns:
-        X[col] = 0
-X = X[feature_order]  # ensure correct order
-
+try:
+    model = joblib.load(MODEL_PATH)
+except Exception as e:
+    st.error(f"❌ Error loading model: {e}")
+    st.stop()
 
 # -----------------------------
-# SHAP Explainer
+# Prepare data for SHAP
 # -----------------------------
-@st.cache_resource
-def get_explainer(_model):
-    return shap.TreeExplainer(_model)
+st.subheader("🧠 SHAP Feature Analysis")
 
-explainer = get_explainer(model)
-base_value = get_expected_value(explainer)
+# Identify target variable
+target_col = "stroke"
+if target_col not in df.columns:
+    st.error(f"Target column '{target_col}' not found in dataset.")
+    st.stop()
 
+X = df.drop(columns=[target_col])
+y = df[target_col]
+
+# Detect categorical columns dynamically (those with dtype == object)
+categorical_cols = X.select_dtypes(include=["object"]).columns.tolist()
+
+if len(categorical_cols) > 0:
+    st.info(f"Auto-detected categorical columns: {categorical_cols}")
+    X_encoded = pd.get_dummies(X, columns=categorical_cols, drop_first=True)
+else:
+    X_encoded = X.copy()
+
+# Convert to numeric (safety)
+X_encoded = X_encoded.apply(pd.to_numeric, errors="coerce").fillna(0)
 
 # -----------------------------
 # Compute SHAP values
 # -----------------------------
-sample_size = min(2000, len(X))
-X_sample = shap.sample(X, sample_size)
+explainer = shap.TreeExplainer(model)
 
-with st.spinner(f"Computing SHAP values for {sample_size} samples..."):
-    shap_values_all = explainer.shap_values(X_sample)
+# Sample for performance
+if len(X_encoded) > 1000:
+    shap_data = X_encoded.sample(1000, random_state=42)
+else:
+    shap_data = X_encoded
 
-    # ✅ Handle both binary and single-output models robustly
-    if isinstance(shap_values_all, list):
-        if len(shap_values_all) > 1:
-            shap_values = shap_values_all[1]  # class 1 = stroke
-        else:
-            shap_values = shap_values_all[0]
-    else:
-        shap_values = shap_values_all
+st.write("Calculating SHAP values... please wait ⏳")
+shap_values = explainer.shap_values(shap_data)
 
 # -----------------------------
-# SHAP Global Plots
+# SHAP Plots
 # -----------------------------
-st.subheader("1️⃣ SHAP Summary Plot (Feature Impact & Direction)")
-fig, ax = plt.subplots(figsize=(12, 8))
-shap.summary_plot(shap_values, X_sample, show=False)
-st.pyplot(fig, clear_figure=True)
+st.markdown("### 📈 1️⃣ SHAP Summary Plot")
 
-st.subheader("2️⃣ Feature Importance (Mean |SHAP|)")
-fig2, ax2 = plt.subplots(figsize=(12, 6))
-shap.summary_plot(shap_values, X_sample, plot_type="bar", show=False)
-st.pyplot(fig2, clear_figure=True)
+fig_summary, ax_summary = plt.subplots(figsize=(8, 6))
+shap.summary_plot(shap_values, shap_data, show=False)
+st.pyplot(fig_summary)
 
+st.markdown("### 🔍 2️⃣ Feature Importance (Mean |SHAP| Values)")
+
+shap.summary_plot(shap_values, shap_data, plot_type="bar", show=False)
+fig_importance, ax_importance = plt.subplots(figsize=(8, 6))
+shap.summary_plot(shap_values, shap_data, plot_type="bar", show=False)
+st.pyplot(fig_importance)
 
 # -----------------------------
-# Individual Prediction Exploration (Force Plot)
+# Individual Prediction
 # -----------------------------
-st.markdown("---")
-st.subheader("3️⃣ Individual Prediction Force Plot Exploration")
-st.markdown("Select an index (from the **sampled** dataset) to view its individual feature contributions.")
+st.markdown("### 🧩 3️⃣ Explore Individual Prediction")
 
-index = st.slider("Select sample index", 0, len(X_sample)-1, 0)
+if len(shap_data) > 0:
+    index_choice = st.slider("Select sample index:", 0, len(shap_data) - 1, 0)
+    individual_data = shap_data.iloc[[index_choice]]
 
-shap.initjs()
-force_plot = shap.plots.force(
-    base_value,
-    shap_values[index],
-    X_sample.iloc[index].values.reshape(1, -1),
-    feature_names=feature_order,
-    matplotlib=False
-)
-components.html(force_plot.html(), height=300)
+    st.write("Selected sample data:")
+    st.dataframe(individual_data)
 
-st.success(f"✅ SHAP analysis loaded successfully using {sample_size} samples! Remember to improve your model's Class 1 Recall.")
+    st.write("**SHAP Force Plot for selected prediction:**")
+    shap_html = shap.force_plot(
+        explainer.expected_value[1],
+        shap_values[1][index_choice],
+        individual_data,
+        matplotlib=False
+    )
+    components.html(shap.getjs() + shap_html.html(), height=300)
+else:
+    st.warning("Not enough data to show individual SHAP plots.")
