@@ -168,13 +168,12 @@ if len(shap_data) > 0:
 
     st.write("**SHAP Force Plot for selected prediction:**")
     try:
-        # --- FINAL, MOST ROBUST FIX FOR FORCE PLOT ERROR ---
-        # Explicitly passing 'X' as the feature argument for broader SHAP compatibility
-        force_plot = shap.plots.force(
-            base_value=expected_value_class1,
-            shap_values=individual_shap_values,
-            X=individual_data, # Renamed argument to 'X' for compatibility
-            matplotlib=False 
+        # --- FINAL CODE ADJUSTMENT: Use shap.force_plot with positional args ---
+        # This is the old syntax but often the only one compatible when library versions conflict.
+        force_plot = shap.force_plot(
+            expected_value_class1,  # 1st positional argument (base_value)
+            individual_shap_values, # 2nd positional argument (shap_values)
+            individual_data         # 3rd positional argument (feature_values)
         )
         st_shap(force_plot, height=300, width=800)
     except Exception as e:
