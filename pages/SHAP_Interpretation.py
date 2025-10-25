@@ -1,147 +1,138 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import shap
 import joblib
-import matplotlib.pyplot as plt
-import streamlit.components.v1 as components
 import os
-import warnings
+import shap
+import matplotlib.pyplot as plt
+import shap.plots as shap_plots  # ✅ new API
+import streamlit.components.v1 as components
 
-warnings.filterwarnings("ignore")
-
-# -----------------------------
-# Streamlit Page Setup
-# -----------------------------
-st.set_page_config(page_title="🔍 SHAP Model Interpretation", layout="centered")
-st.title("🧠 Stroke Prediction – SHAP Interpretation Dashboard")
+st.set_page_config(page_title="🔍 Predict Stroke Risk with SHAP Insights", layout="wide")
+st.title("🔍 Predict Stroke Risk with SHAP Insights")
 
 # -----------------------------
 # Paths
 # -----------------------------
 BASE_DIR = os.path.dirname(__file__)
-DATA_PATH = os.path.join(BASE_DIR, "../data/test_data.csv")
+DATA_PATH = os.path.join(BASE_DIR, "../data/stroke_cleaned.csv")
 MODEL_PATH = os.path.join(BASE_DIR, "../models/stroke_model.pkl")
 
 # -----------------------------
-# Load Model & Data
+# Load data and model
 # -----------------------------
+st.subheader("📊 Data Preview")
+
+try:
+    df = pd.read_csv(DATA_PATH)
+    st.dataframe(df.head())
+except FileNotFoundError:
+    st.error("❌ stroke_cleaned.csv not found. Please check your /data folder.")
+    st.stop()
+
 try:
     model = joblib.load(MODEL_PATH)
-    test_data = pd.read_csv(DATA_PATH)
-    st.success("✅ Model and test dataset loaded successfully.")
-except FileNotFoundError:
-    st.error("❌ Missing file: Could not find model or test_data.csv. Check the /data and /models folders.")
+except Exception as e:
+    st.error(f"❌ Error loading model: {e}")
     st.stop()
 
 # -----------------------------
-# Data Preparation
+# Prepare data for SHAP
 # -----------------------------
-if "stroke" in test_data.columns:
-    X_test = test_data.drop(columns=["stroke"])
-else:
-    X_test = test_data.copy()
+st.subheader("🧠 SHAP Feature Analysis")
 
-# Auto-sample if dataset too large (for SHAP performance)
-if len(X_test) > 1000:
-    st.warning(f"⚠️ Dataset too large ({len(X_test)} rows). Sampling 1000 rows for SHAP to avoid lag.")
-    X_sample = X_test.sample(1000, random_state=42)
-else:
-    X_sample = X_test.copy()
-
-st.write("### 📋 Test Data Sample")
-st.dataframe(X_test.head())
-
-# -----------------------------
-# Cached SHAP Computation
-# -----------------------------
-@st.cache_data(show_spinner=True, max_entries=5)
-def compute_shap_values(model, X_sample):
-    """Compute SHAP values with caching for speed."""
-    # Auto-detect explainer type
-    if hasattr(model, "predict_proba"):
-        explainer = shap.Explainer(model, X_sample)
-    else:
-        explainer = shap.KernelExplainer(
-            model.predict, 
-            X_sample.sample(min(100, len(X_sample)), random_state=42)
-        )
-    shap_values = explainer(X_sample)
-    return explainer, shap_values
-
-# -----------------------------
-# Compute SHAP Values
-# -----------------------------
-st.write("### ⚙️ Computing SHAP Values... (cached)")
-
-try:
-    explainer, shap_values = compute_shap_values(model, X_sample)
-    st.success(f"✅ SHAP values computed on {len(X_sample)} samples (cached).")
-except Exception as e:
-    st.error(f"⚠️ Failed to compute SHAP values: {e}")
+target_col = "stroke"
+if target_col not in df.columns:
+    st.error(f"Target column '{target_col}' not found in dataset.")
     st.stop()
 
-# -----------------------------
-# 1️⃣ SHAP Summary Plot
-# -----------------------------
-st.subheader("1️⃣ SHAP Summary Plot")
-fig_summary, ax = plt.subplots(figsize=(8, 5))
-shap.summary_plot(shap_values.values, X_sample, show=False)
-st.pyplot(fig_summary, clear_figure=True)
+X = df.drop(columns=[target_col])
+y = df[target_col]
+
+# Detect categorical columns dynamically
+categorical_cols = X.select_dtypes(include=["object"]).columns.tolist()
+st.info(f"Auto-detected categorical columns: {categorical_cols}")
+
+# One-hot encode
+X_encoded = pd.get_dummies(X, columns=categorical_cols, drop_first=True)
+X_encoded = X_encoded.apply(pd.to_numeric, errors="coerce").fillna(0)
 
 # -----------------------------
-# 2️⃣ Mean |SHAP| Feature Importance
+# Match model’s training feature order
 # -----------------------------
-st.subheader("2️⃣ Mean |SHAP| Feature Importance")
-
-mean_abs_shap = np.abs(shap_values.values).mean(axis=0)
-importance_df = pd.DataFrame({
-    "Feature": X_sample.columns,
-    "Mean |SHAP|": mean_abs_shap
-}).sort_values(by="Mean |SHAP|", ascending=False)
-
-st.bar_chart(importance_df.set_index("Feature"))
-
-# -----------------------------
-# 3️⃣ Individual Prediction Force Plot
-# -----------------------------
-st.subheader("3️⃣ Explore Individual Predictions")
-
-selected_index = st.slider("Select a sample index", 0, len(X_sample) - 1, 0)
-
-# Determine correct base value for SHAP 0.20+
-if isinstance(explainer.expected_value, (list, np.ndarray)):
-    base_value = explainer.expected_value[0]
+if hasattr(model, "feature_names_in_"):
+    model_features = list(model.feature_names_in_)
+    missing_cols = [c for c in model_features if c not in X_encoded.columns]
+    for c in missing_cols:
+        X_encoded[c] = 0
+    X_encoded = X_encoded[model_features]
+    st.success(f"✅ Matched model feature order ({len(model_features)} features).")
 else:
-    base_value = explainer.expected_value
-
-try:
-    shap.plots.force(
-        base_value,
-        shap_values.values[selected_index, :],
-        X_sample.iloc[selected_index, :],
-        matplotlib=True
-    )
-    st.pyplot(bbox_inches="tight", pad_inches=0.5, clear_figure=True)
-except Exception as e:
-    st.error(f"⚠️ Could not render force plot: {e}")
+    st.warning("⚠️ Model does not store feature_names_in_. SHAP may still work, but verify features match.")
 
 # -----------------------------
-# 4️⃣ Interactive HTML Force Plot
+# Compute SHAP values
 # -----------------------------
-with st.expander("💡 View Interactive Force Plot (HTML)", expanded=False):
+explainer = shap.TreeExplainer(model)
+
+if len(X_encoded) > 1000:
+    shap_data = X_encoded.sample(1000, random_state=42)
+else:
+    shap_data = X_encoded
+
+st.write("Calculating SHAP values... please wait ⏳")
+shap_values = explainer.shap_values(shap_data)
+
+# -----------------------------
+# SHAP Summary Plots
+# -----------------------------
+st.markdown("### 📈 1️⃣ SHAP Summary Plot")
+
+fig_summary, ax_summary = plt.subplots(figsize=(8, 6))
+shap.summary_plot(shap_values, shap_data, show=False)
+st.pyplot(fig_summary)
+
+st.markdown("### 🔍 2️⃣ Feature Importance (Mean |SHAP| Values)")
+
+fig_importance, ax_importance = plt.subplots(figsize=(8, 6))
+shap.summary_plot(shap_values, shap_data, plot_type="bar", show=False)
+st.pyplot(fig_importance)
+
+# -----------------------------
+# Individual Prediction
+# -----------------------------
+st.markdown("### 🧩 3️⃣ Explore Individual Prediction")
+
+if len(shap_data) > 0:
+    index_choice = st.slider("Select sample index:", 0, len(shap_data) - 1, 0)
+    individual_data = shap_data.iloc[[index_choice]]
+
+    st.write("Selected sample data:")
+    st.dataframe(individual_data)
+
+    st.write("**SHAP Force Plot for selected prediction:**")
+
     try:
-        force_html = shap.plots.force(
-            base_value,
-            shap_values.values[selected_index, :],
-            X_sample.iloc[selected_index, :]
+        # ✅ For binary classifiers
+        fig_force = shap_plots.force(
+            explainer.expected_value[1]
+            if isinstance(explainer.expected_value, (list, np.ndarray))
+            else explainer.expected_value,
+            shap_values[1][index_choice]
+            if isinstance(shap_values, list)
+            else shap_values[index_choice],
+            individual_data,
+            matplotlib=True
         )
-        shap_html = f"<head>{shap.getjs()}</head><body>{force_html.html()}</body>"
-        components.html(shap_html, height=300)
-    except Exception as e:
-        st.warning(f"Interactive SHAP plot unavailable: {e}")
+    except Exception:
+        # ✅ Fallback for single-output models
+        fig_force = shap_plots.force(
+            explainer.expected_value,
+            shap_values[index_choice],
+            individual_data,
+            matplotlib=True
+        )
 
-# -----------------------------
-# Footer
-# -----------------------------
-st.info("✅ All SHAP visualizations generated successfully!")
+    st.pyplot(fig_force)
+else:
+    st.warning("Not enough data to show individual SHAP plots.")
