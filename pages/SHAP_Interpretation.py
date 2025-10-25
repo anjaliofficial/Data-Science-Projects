@@ -16,7 +16,6 @@ st.title("🔍 Predict Stroke Risk with SHAP Insights")
 # -----------------------------
 # Paths
 # -----------------------------
-# BASE_DIR is the directory of the current script (pages)
 BASE_DIR = os.path.dirname(__file__)
 DATA_PATH = os.path.join(BASE_DIR, "../data/stroke_cleaned.csv")
 MODEL_PATH = os.path.join(BASE_DIR, "../models/stroke_model.pkl")
@@ -66,9 +65,9 @@ X_encoded = pd.get_dummies(X, columns=categorical_cols, drop_first=True)
 # Convert all to numeric and fill NaN (from coercing non-numeric values)
 X_encoded = X_encoded.apply(pd.to_numeric, errors="coerce").fillna(0) 
 
-# --- CRITICAL CORRECTION AREA: FEATURE ALIGNMENT ---
-# The goal is to make X_encoded's columns match feature_order exactly in name and count.
-
+# -----------------------------
+# Robust Feature Alignment (VITAL FIX)
+# -----------------------------
 # 1. Add missing columns (features expected by the model but not in the current data)
 missing_cols = [c for c in feature_order if c not in X_encoded.columns]
 for c in missing_cols:
@@ -84,29 +83,47 @@ if extra_cols:
 X_encoded = X_encoded[feature_order]
 
 # -----------------------------
+# DEBUGGING STEP: Check Column Counts
+# -----------------------------
+expected_count = len(feature_order)
+current_count = len(X_encoded.columns)
+st.subheader("⚠️ Debug Check: Feature Alignment Status")
+st.info(f"Expected Feature Count (from feature_names.pkl): **{expected_count}**")
+st.info(f"Current Data Feature Count (after alignment): **{current_count}**")
+
+# If this warning shows, the problem is in the saved feature_order or the data loading.
+if expected_count != current_count:
+    st.error("FATAL: Feature counts DO NOT match after alignment. Check your `feature_order` file and original data.")
+    st.stop()
+# -----------------------------
+
+# -----------------------------
 # SHAP Explainer & Values
 # -----------------------------
 explainer = shap.TreeExplainer(model)
 
-# Use a subsample of data for faster SHAP calculation, ensuring column alignment is maintained
+# Use a subsample of data for faster SHAP calculation, maintaining column alignment
 if len(X_encoded) > 1000:
     shap_data = X_encoded.sample(1000, random_state=42)
 else:
     shap_data = X_encoded
 
 st.write("Calculating SHAP values... please wait ⏳")
+# The SHAP values calculation must use the data frame with the exact same columns as the model input
 shap_values = explainer.shap_values(shap_data)
 
 # --- SHAP Value Selection (Binary Classifier) ---
-# For binary classification, SHAP returns a list: [class_0, class_1]. 
 # We target the positive class (stroke risk), which is index 1.
-if isinstance(shap_values, list):
+if isinstance(shap_values, list) and len(shap_values) > 1:
     shap_values_class1 = shap_values[1]
     expected_value_class1 = explainer.expected_value[1] 
-else:
-    # Handle single-output models if necessary
+elif isinstance(shap_values, np.ndarray):
+    # Handle single-output regression or single-class classification
     shap_values_class1 = shap_values
     expected_value_class1 = explainer.expected_value
+else:
+    st.error("❌ SHAP values are not in an expected format (list or numpy array). Check your model type.")
+    st.stop()
 
 
 # -----------------------------
@@ -124,8 +141,19 @@ st.markdown("### 🔍 Feature Importance (Mean |SHAP| Values)")
 # Calculate mean absolute SHAP using the correct array
 mean_abs_shap = np.abs(shap_values_class1).mean(axis=0).flatten()
 
-# The Assertion now validates the corrected feature alignment:
-assert len(shap_data.columns) == len(mean_abs_shap), "Mismatch in feature and SHAP values length"
+# --- FINAL ASSERTION CHECK ---
+# Check 1: Feature count from the DataFrame
+feature_len = len(shap_data.columns)
+# Check 2: SHAP output count (the cause of the original error)
+shap_len = len(mean_abs_shap)
+
+# If the code reaches this point, the counts from the data should match.
+# If it fails, it means the model's SHAP output has a different number of columns 
+# than the input data, indicating a model saving/loading inconsistency.
+assert feature_len == shap_len, (
+    f"Mismatch in feature and SHAP values length: Features={feature_len}, SHAP Output={shap_len}. "
+    f"This usually means the saved model is inconsistent with the feature_order file."
+)
 
 importance_df = pd.DataFrame({
     "Feature": shap_data.columns.tolist(),
