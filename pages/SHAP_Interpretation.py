@@ -5,8 +5,7 @@ import joblib
 import os
 import shap
 import matplotlib.pyplot as plt
-import shap.plots as shap_plots  # new API
-import streamlit.components.v1 as components
+from streamlit_shap import st_shap
 
 # -----------------------------
 # Page Config
@@ -71,7 +70,7 @@ for c in missing_cols:
 X_encoded = X_encoded[feature_order]
 
 # -----------------------------
-# SHAP Explainer
+# SHAP Explainer & Values
 # -----------------------------
 explainer = shap.TreeExplainer(model)
 
@@ -87,9 +86,7 @@ shap_values = explainer.shap_values(shap_data)
 # 1️⃣ SHAP Summary Plot
 # -----------------------------
 st.markdown("### 📈 SHAP Summary Plot")
-fig_summary, ax_summary = plt.subplots(figsize=(8, 6))
-shap.summary_plot(shap_values, shap_data, show=False)
-st.pyplot(fig_summary)
+st_shap(shap.summary_plot(shap_values, shap_data, show=False), height=500)
 
 # -----------------------------
 # 2️⃣ Mean |SHAP| Feature Importance
@@ -97,14 +94,13 @@ st.pyplot(fig_summary)
 st.markdown("### 🔍 Feature Importance (Mean |SHAP| Values)")
 
 if isinstance(shap_values, list):
-    # Binary classifier: take class 1
+    # Binary classifier: take class 1 SHAP values
     shap_vals_class1 = shap_values[1]
     mean_abs_shap = np.abs(shap_vals_class1).mean(axis=0).flatten()
 else:
-    # Single-output
     mean_abs_shap = np.abs(shap_values).mean(axis=0).flatten()
 
-# Sanity check lengths
+# Ensure feature and SHAP values length match
 assert len(shap_data.columns) == len(mean_abs_shap), "Mismatch in feature and SHAP values length"
 
 importance_df = pd.DataFrame({
@@ -130,21 +126,20 @@ if len(shap_data) > 0:
     try:
         if isinstance(shap_values, list):
             # Binary classifier
-            fig_force = shap_plots.force(
+            force_plot = shap.force_plot(
                 explainer.expected_value[1],
                 shap_values[1][index_choice],
-                individual_data,
-                matplotlib=True
+                individual_data
             )
         else:
             # Single-output
-            fig_force = shap_plots.force(
+            force_plot = shap.force_plot(
                 explainer.expected_value,
                 shap_values[index_choice],
-                individual_data,
-                matplotlib=True
+                individual_data
             )
-        st.pyplot(fig_force)
+        # Use streamlit-shap to display force plot
+        st_shap(force_plot, height=300, width=800)
     except Exception as e:
         st.error(f"❌ Error generating force plot: {e}")
 else:
