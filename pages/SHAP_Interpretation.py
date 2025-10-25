@@ -5,6 +5,7 @@ import joblib
 import os
 import shap
 import matplotlib.pyplot as plt
+import shap.plots as shap_plots  # ✅ new API
 import streamlit.components.v1 as components
 
 st.set_page_config(page_title="🔍 Predict Stroke Risk with SHAP Insights", layout="wide")
@@ -48,34 +49,32 @@ if target_col not in df.columns:
 X = df.drop(columns=[target_col])
 y = df[target_col]
 
-# Detect categorical columns
+# Detect categorical columns dynamically
 categorical_cols = X.select_dtypes(include=["object"]).columns.tolist()
 st.info(f"Auto-detected categorical columns: {categorical_cols}")
 
-# Encode
+# One-hot encode
 X_encoded = pd.get_dummies(X, columns=categorical_cols, drop_first=True)
 X_encoded = X_encoded.apply(pd.to_numeric, errors="coerce").fillna(0)
 
 # -----------------------------
-# Match model's feature order
+# Match model’s training feature order
 # -----------------------------
-# If your model was trained with feature names saved
-model_features = None
 if hasattr(model, "feature_names_in_"):
     model_features = list(model.feature_names_in_)
     missing_cols = [c for c in model_features if c not in X_encoded.columns]
     for c in missing_cols:
-        X_encoded[c] = 0  # add missing columns
-    X_encoded = X_encoded[model_features]  # reorder to match model
+        X_encoded[c] = 0
+    X_encoded = X_encoded[model_features]
+    st.success(f"✅ Matched model feature order ({len(model_features)} features).")
 else:
-    st.warning("⚠️ Model does not store feature_names_in_. SHAP may still run, but ensure features match.")
+    st.warning("⚠️ Model does not store feature_names_in_. SHAP may still work, but verify features match.")
 
 # -----------------------------
 # Compute SHAP values
 # -----------------------------
 explainer = shap.TreeExplainer(model)
 
-# Sample for speed
 if len(X_encoded) > 1000:
     shap_data = X_encoded.sample(1000, random_state=42)
 else:
@@ -85,7 +84,7 @@ st.write("Calculating SHAP values... please wait ⏳")
 shap_values = explainer.shap_values(shap_data)
 
 # -----------------------------
-# SHAP Plots
+# SHAP Summary Plots
 # -----------------------------
 st.markdown("### 📈 1️⃣ SHAP Summary Plot")
 
@@ -113,22 +112,27 @@ if len(shap_data) > 0:
 
     st.write("**SHAP Force Plot for selected prediction:**")
 
-    # Handle binary or multiclass models
     try:
-        shap_html = shap.force_plot(
-            explainer.expected_value[1],
-            shap_values[1][index_choice],
+        # ✅ For binary classifiers
+        fig_force = shap_plots.force(
+            explainer.expected_value[1]
+            if isinstance(explainer.expected_value, (list, np.ndarray))
+            else explainer.expected_value,
+            shap_values[1][index_choice]
+            if isinstance(shap_values, list)
+            else shap_values[index_choice],
             individual_data,
-            matplotlib=False
+            matplotlib=True
         )
     except Exception:
-        shap_html = shap.force_plot(
+        # ✅ Fallback for single-output models
+        fig_force = shap_plots.force(
             explainer.expected_value,
             shap_values[index_choice],
             individual_data,
-            matplotlib=False
+            matplotlib=True
         )
 
-    components.html(shap.getjs() + shap_html.html(), height=300)
+    st.pyplot(fig_force)
 else:
     st.warning("Not enough data to show individual SHAP plots.")
