@@ -6,8 +6,8 @@ import os
 import shap
 import matplotlib.pyplot as plt
 from streamlit_shap import st_shap
-
-# -----------------------------
+import warnings
+warnings.filterwarnings("ignore", message=".*The 'nopython' keyword.*")# -----------------------------
 # Page Config
 # -----------------------------
 st.set_page_config(page_title="🔍 Predict Stroke Risk with SHAP Insights", layout="wide")
