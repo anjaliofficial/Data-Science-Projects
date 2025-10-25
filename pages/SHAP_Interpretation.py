@@ -98,7 +98,7 @@ st.write("Calculating SHAP values... please wait ⏳")
 shap_values = explainer.shap_values(shap_data)
 
 # -----------------------------
-# FIX FOR SHAP OUTPUT SELECTION (Binary Classifier)
+# SHAP OUTPUT SELECTION
 # -----------------------------
 if isinstance(shap_values, list) and len(shap_values) > 1:
     # Use the SHAP values for the positive class (Stroke Risk, index 1)
@@ -168,13 +168,12 @@ if len(shap_data) > 0:
 
     st.write("**SHAP Force Plot for selected prediction:**")
     try:
-        # --- FIX FOR DEPRECATED SHAP.FORCE_PLOT ---
-        # Using shap.plots.force ensures compatibility with modern SHAP versions
+        # --- FIX FOR DEPRECATED SHAP.FORCE_PLOT USING EXPLICIT KEYWORDS ---
         force_plot = shap.plots.force(
-            expected_value_class1,
-            individual_shap_values,
-            individual_data,
-            matplotlib=False # Forces interactive JavaScript plot for st_shap
+            base_value=expected_value_class1,
+            shap_values=individual_shap_values,
+            features=individual_data,
+            matplotlib=False 
         )
         st_shap(force_plot, height=300, width=800)
     except Exception as e:
