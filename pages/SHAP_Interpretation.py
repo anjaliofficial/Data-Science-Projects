@@ -39,7 +39,6 @@ except FileNotFoundError:
 try:
     model = joblib.load(MODEL_PATH)
     scaler = joblib.load(SCALER_PATH)
-    # Load the exact feature names and order the model was trained on
     feature_order = joblib.load(FEATURES_PATH) 
 except Exception as e:
     st.error(f"❌ Error loading model/scaler/features: {e}")
@@ -62,24 +61,23 @@ st.info(f"Auto-detected categorical columns: {categorical_cols}")
 
 # One-hot encode categorical features
 X_encoded = pd.get_dummies(X, columns=categorical_cols, drop_first=True)
-# Convert all to numeric and fill NaN (from coercing non-numeric values)
 X_encoded = X_encoded.apply(pd.to_numeric, errors="coerce").fillna(0) 
 
 # -----------------------------
-# Robust Feature Alignment (VITAL FIX)
+# Robust Feature Alignment (Ensures 16 features are present)
 # -----------------------------
-# 1. Add missing columns (features expected by the model but not in the current data)
+# 1. Add missing columns
 missing_cols = [c for c in feature_order if c not in X_encoded.columns]
 for c in missing_cols:
     X_encoded[c] = 0
 
-# 2. Drop extra columns (features in the current data but NOT expected by the model)
+# 2. Drop extra columns
 extra_cols = [c for c in X_encoded.columns if c not in feature_order]
 if extra_cols:
     X_encoded = X_encoded.drop(columns=extra_cols)
     st.warning(f"Dropped {len(extra_cols)} extra features not in model training data.")
 
-# 3. Final Reorder (Ensures the columns are in the exact sequence the model expects)
+# 3. Final Reorder
 X_encoded = X_encoded[feature_order]
 
 # -----------------------------
@@ -87,50 +85,54 @@ X_encoded = X_encoded[feature_order]
 # -----------------------------
 expected_count = len(feature_order)
 current_count = len(X_encoded.columns)
-st.subheader("⚠️ Debug Check: Feature Alignment Status")
-st.info(f"Expected Feature Count (from feature_names.pkl): **{expected_count}**")
-st.info(f"Current Data Feature Count (after alignment): **{current_count}**")
 
-# If this warning shows, the problem is in the saved feature_order or the data loading.
 if expected_count != current_count:
-    st.error("FATAL: Feature counts DO NOT match after alignment. Check your `feature_order` file and original data.")
+    st.error(f"FATAL: Feature counts DO NOT match after alignment. Expected: {expected_count}, Found: {current_count}")
     st.stop()
-# -----------------------------
 
 # -----------------------------
 # SHAP Explainer & Values
 # -----------------------------
 explainer = shap.TreeExplainer(model)
 
-# Use a subsample of data for faster SHAP calculation, maintaining column alignment
 if len(X_encoded) > 1000:
     shap_data = X_encoded.sample(1000, random_state=42)
 else:
     shap_data = X_encoded
 
 st.write("Calculating SHAP values... please wait ⏳")
-# The SHAP values calculation must use the data frame with the exact same columns as the model input
 shap_values = explainer.shap_values(shap_data)
 
-# --- SHAP Value Selection (Binary Classifier) ---
-# We target the positive class (stroke risk), which is index 1.
+# -----------------------------
+# FIX FOR SHAP OUTPUT MISMATCH (32 vs 16)
+# -----------------------------
 if isinstance(shap_values, list) and len(shap_values) > 1:
-    shap_values_class1 = shap_values[1]
+    # This block handles the binary classification model output ([class_0, class_1])
+    # We must explicitly use the SHAP values for the positive class (Stroke Risk, index 1)
+    shap_values_class1 = np.array(shap_values[1])
     expected_value_class1 = explainer.expected_value[1] 
+    
+    # Critical Check: Ensures the selected array has the correct feature count (16)
+    if shap_values_class1.shape[1] != len(shap_data.columns):
+        st.error(
+            f"❌ SHAP array feature count mismatch: SHAP output has {shap_values_class1.shape[1]} columns, "
+            f"but data has {len(shap_data.columns)}."
+        )
+        st.stop()
+
 elif isinstance(shap_values, np.ndarray):
-    # Handle single-output regression or single-class classification
+    # Handles single-output models (regression/single-class)
     shap_values_class1 = shap_values
     expected_value_class1 = explainer.expected_value
 else:
-    st.error("❌ SHAP values are not in an expected format (list or numpy array). Check your model type.")
+    st.error("❌ SHAP values are not in an expected format. Check your model type/SHAP library.")
     st.stop()
-
 
 # -----------------------------
 # 1️⃣ SHAP Summary Plot
 # -----------------------------
 st.markdown("### 📈 SHAP Summary Plot (Impact on Stroke Risk)")
-# Plot using the single array for class 1
+# Plot using only the single array for class 1
 st_shap(shap.summary_plot(shap_values_class1, shap_data, show=False), height=500)
 
 # -----------------------------
@@ -138,21 +140,16 @@ st_shap(shap.summary_plot(shap_values_class1, shap_data, show=False), height=500
 # -----------------------------
 st.markdown("### 🔍 Feature Importance (Mean |SHAP| Values)")
 
-# Calculate mean absolute SHAP using the correct array
+# Calculate mean absolute SHAP using the correct (N_SAMPLES, 16) array
 mean_abs_shap = np.abs(shap_values_class1).mean(axis=0).flatten()
 
-# --- FINAL ASSERTION CHECK ---
-# Check 1: Feature count from the DataFrame
+# Final assertion (Should pass if the logic above is correct)
 feature_len = len(shap_data.columns)
-# Check 2: SHAP output count (the cause of the original error)
 shap_len = len(mean_abs_shap)
 
-# If the code reaches this point, the counts from the data should match.
-# If it fails, it means the model's SHAP output has a different number of columns 
-# than the input data, indicating a model saving/loading inconsistency.
 assert feature_len == shap_len, (
     f"Mismatch in feature and SHAP values length: Features={feature_len}, SHAP Output={shap_len}. "
-    f"This usually means the saved model is inconsistent with the feature_order file."
+    f"This indicates a deep model inconsistency requiring retraining."
 )
 
 importance_df = pd.DataFrame({
@@ -169,9 +166,9 @@ st.markdown("### 🧩 Explore Individual Prediction")
 
 if len(shap_data) > 0:
     index_choice = st.slider("Select sample index:", 0, len(shap_data) - 1, 0)
-    # The selected sample's feature data
+    
+    # Ensure data and SHAP values are extracted from the correct objects
     individual_data = shap_data.iloc[[index_choice]] 
-    # The selected sample's SHAP values for class 1
     individual_shap_values = shap_values_class1[index_choice] 
 
     st.write("Selected sample data:")
@@ -179,13 +176,11 @@ if len(shap_data) > 0:
 
     st.write("**SHAP Force Plot for selected prediction:**")
     try:
-        # Use the pre-calculated Class 1 expected value and SHAP values
         force_plot = shap.force_plot(
             expected_value_class1,
             individual_shap_values,
             individual_data
         )
-        # Use streamlit-shap to display force plot
         st_shap(force_plot, height=300, width=800)
     except Exception as e:
         st.error(f"❌ Error generating force plot: {e}")
