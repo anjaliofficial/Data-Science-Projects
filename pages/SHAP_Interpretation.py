@@ -16,6 +16,7 @@ st.title("🔍 Predict Stroke Risk with SHAP Insights")
 # -----------------------------
 # Paths
 # -----------------------------
+# BASE_DIR is the directory of the current script (pages)
 BASE_DIR = os.path.dirname(__file__)
 DATA_PATH = os.path.join(BASE_DIR, "../data/stroke_cleaned.csv")
 MODEL_PATH = os.path.join(BASE_DIR, "../models/stroke_model.pkl")
@@ -39,7 +40,8 @@ except FileNotFoundError:
 try:
     model = joblib.load(MODEL_PATH)
     scaler = joblib.load(SCALER_PATH)
-    feature_order = joblib.load(FEATURES_PATH)
+    # Load the exact feature names and order the model was trained on
+    feature_order = joblib.load(FEATURES_PATH) 
 except Exception as e:
     st.error(f"❌ Error loading model/scaler/features: {e}")
     st.stop()
@@ -61,12 +63,24 @@ st.info(f"Auto-detected categorical columns: {categorical_cols}")
 
 # One-hot encode categorical features
 X_encoded = pd.get_dummies(X, columns=categorical_cols, drop_first=True)
-X_encoded = X_encoded.apply(pd.to_numeric, errors="coerce").fillna(0)
+# Convert all to numeric and fill NaN (from coercing non-numeric values)
+X_encoded = X_encoded.apply(pd.to_numeric, errors="coerce").fillna(0) 
 
-# Match model feature order
+# --- CRITICAL CORRECTION AREA: FEATURE ALIGNMENT ---
+# The goal is to make X_encoded's columns match feature_order exactly in name and count.
+
+# 1. Add missing columns (features expected by the model but not in the current data)
 missing_cols = [c for c in feature_order if c not in X_encoded.columns]
 for c in missing_cols:
     X_encoded[c] = 0
+
+# 2. Drop extra columns (features in the current data but NOT expected by the model)
+extra_cols = [c for c in X_encoded.columns if c not in feature_order]
+if extra_cols:
+    X_encoded = X_encoded.drop(columns=extra_cols)
+    st.warning(f"Dropped {len(extra_cols)} extra features not in model training data.")
+
+# 3. Final Reorder (Ensures the columns are in the exact sequence the model expects)
 X_encoded = X_encoded[feature_order]
 
 # -----------------------------
@@ -74,6 +88,7 @@ X_encoded = X_encoded[feature_order]
 # -----------------------------
 explainer = shap.TreeExplainer(model)
 
+# Use a subsample of data for faster SHAP calculation, ensuring column alignment is maintained
 if len(X_encoded) > 1000:
     shap_data = X_encoded.sample(1000, random_state=42)
 else:
@@ -82,25 +97,34 @@ else:
 st.write("Calculating SHAP values... please wait ⏳")
 shap_values = explainer.shap_values(shap_data)
 
+# --- SHAP Value Selection (Binary Classifier) ---
+# For binary classification, SHAP returns a list: [class_0, class_1]. 
+# We target the positive class (stroke risk), which is index 1.
+if isinstance(shap_values, list):
+    shap_values_class1 = shap_values[1]
+    expected_value_class1 = explainer.expected_value[1] 
+else:
+    # Handle single-output models if necessary
+    shap_values_class1 = shap_values
+    expected_value_class1 = explainer.expected_value
+
+
 # -----------------------------
 # 1️⃣ SHAP Summary Plot
 # -----------------------------
-st.markdown("### 📈 SHAP Summary Plot")
-st_shap(shap.summary_plot(shap_values, shap_data, show=False), height=500)
+st.markdown("### 📈 SHAP Summary Plot (Impact on Stroke Risk)")
+# Plot using the single array for class 1
+st_shap(shap.summary_plot(shap_values_class1, shap_data, show=False), height=500)
 
 # -----------------------------
 # 2️⃣ Mean |SHAP| Feature Importance
 # -----------------------------
 st.markdown("### 🔍 Feature Importance (Mean |SHAP| Values)")
 
-if isinstance(shap_values, list):
-    # Binary classifier: take class 1 SHAP values
-    shap_vals_class1 = shap_values[1]
-    mean_abs_shap = np.abs(shap_vals_class1).mean(axis=0).flatten()
-else:
-    mean_abs_shap = np.abs(shap_values).mean(axis=0).flatten()
+# Calculate mean absolute SHAP using the correct array
+mean_abs_shap = np.abs(shap_values_class1).mean(axis=0).flatten()
 
-# Ensure feature and SHAP values length match
+# The Assertion now validates the corrected feature alignment:
 assert len(shap_data.columns) == len(mean_abs_shap), "Mismatch in feature and SHAP values length"
 
 importance_df = pd.DataFrame({
@@ -117,27 +141,22 @@ st.markdown("### 🧩 Explore Individual Prediction")
 
 if len(shap_data) > 0:
     index_choice = st.slider("Select sample index:", 0, len(shap_data) - 1, 0)
-    individual_data = shap_data.iloc[[index_choice]]
+    # The selected sample's feature data
+    individual_data = shap_data.iloc[[index_choice]] 
+    # The selected sample's SHAP values for class 1
+    individual_shap_values = shap_values_class1[index_choice] 
 
     st.write("Selected sample data:")
     st.dataframe(individual_data)
 
     st.write("**SHAP Force Plot for selected prediction:**")
     try:
-        if isinstance(shap_values, list):
-            # Binary classifier
-            force_plot = shap.force_plot(
-                explainer.expected_value[1],
-                shap_values[1][index_choice],
-                individual_data
-            )
-        else:
-            # Single-output
-            force_plot = shap.force_plot(
-                explainer.expected_value,
-                shap_values[index_choice],
-                individual_data
-            )
+        # Use the pre-calculated Class 1 expected value and SHAP values
+        force_plot = shap.force_plot(
+            expected_value_class1,
+            individual_shap_values,
+            individual_data
+        )
         # Use streamlit-shap to display force plot
         st_shap(force_plot, height=300, width=800)
     except Exception as e:
