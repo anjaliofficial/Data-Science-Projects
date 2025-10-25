@@ -99,10 +99,13 @@ st.markdown("### 🔍 Feature Importance (Mean |SHAP| Values)")
 if isinstance(shap_values, list):
     # Binary classifier: take class 1
     shap_vals_class1 = shap_values[1]
-    mean_abs_shap = np.abs(shap_vals_class1).mean(axis=0)
+    mean_abs_shap = np.abs(shap_vals_class1).mean(axis=0).flatten()
 else:
     # Single-output
-    mean_abs_shap = np.abs(shap_values).mean(axis=0)
+    mean_abs_shap = np.abs(shap_values).mean(axis=0).flatten()
+
+# Sanity check lengths
+assert len(shap_data.columns) == len(mean_abs_shap), "Mismatch in feature and SHAP values length"
 
 importance_df = pd.DataFrame({
     "Feature": shap_data.columns.tolist(),
