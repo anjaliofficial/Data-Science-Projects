@@ -6,12 +6,12 @@ import os
 import shap
 import matplotlib.pyplot as plt
 import streamlit.components.v1 as components
-from streamlit_shap import st_shap # New Import
+from streamlit_shap import st_shap # Dedicated library for stable Force Plot rendering
 import warnings
 
 # Suppress warnings
-warnings.filterwarnings("ignore", category=UserWarning)
-warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.warnings.filterwarnings("ignore", category=UserWarning)
+warnings.warnings.filterwarnings("ignore", category=FutureWarning)
 
 st.set_page_config(page_title="Predict Stroke Risk", layout="centered")
 st.title("🔍 Predict Stroke Risk with SHAP Insights")
@@ -32,8 +32,10 @@ FEATURES_PATH = os.path.join(MODEL_DIR, "feature_names.pkl")
 def get_expected_value(explainer):
     """Safely retrieves the base value (log-odds) for the positive class (index 1)."""
     ev = explainer.expected_value
+    # For multi-output models (list or multi-dim array)
     if isinstance(ev, np.ndarray) and ev.ndim >= 1 and ev.size >= 2:
         return ev[1]  # Return the base value for the positive class (stroke=1)
+    # For single-output models
     if isinstance(ev, (float, np.ndarray)):
         return ev.item() if isinstance(ev, np.ndarray) else ev
     return ev
@@ -48,6 +50,10 @@ def load_artifacts():
         model = joblib.load(MODEL_PATH)
         scaler = joblib.load(SCALER_PATH)
         feature_order = joblib.load(FEATURES_PATH)
+        # Ensure feature_order is a list for consistency
+        if not isinstance(feature_order, list):
+             feature_order = feature_order.tolist() if isinstance(feature_order, np.ndarray) else list(feature_order)
+             
         explainer = shap.TreeExplainer(model) 
         return model, scaler, feature_order, explainer
     except Exception as e:
@@ -104,7 +110,7 @@ X_raw = input_df.copy()
 categorical_cols = X_raw.select_dtypes(include=["object"]).columns.tolist()
 X_encoded = pd.get_dummies(X_raw, columns=categorical_cols, drop_first=True)
 
-# 3. Align Columns (Fixes: AttributeError from previous bug)
+# 3. Align Columns (Fixed previous AttributeError)
 X_aligned = pd.DataFrame(columns=feature_order)
 for col in feature_order:
     X_aligned[col] = X_encoded.get(col, [0]) 
@@ -141,22 +147,33 @@ if st.button("Predict Stroke Risk", type="primary"):
     # Use the UN-SCALED, aligned DataFrame X_aligned for SHAP calculation for readable values
     shap_values_list = explainer.shap_values(X_aligned)
 
-    # --- CRITICAL FIX FOR DIMENSION ERROR ---
-    # We must ensure shap_values_pos_class is a 1D array.
-    if isinstance(shap_values_list, list) and len(shap_values_list) > 1:
-        # Get class 1 values, and extract the single row [0] to make it 1D
-        shap_values_pos_class = shap_values_list[1][0] 
-    elif isinstance(shap_values_list, np.ndarray) and shap_values_list.ndim == 2:
-        # If it's a 2D array (1, N), extract the single row [0] to make it 1D
-        shap_values_pos_class = shap_values_list[0]
-    else:
-        # Fallback to flatten (though the above slices are more robust)
-        shap_values_pos_class = shap_values_list.flatten()
-    # ----------------------------------------
+    # --- CRITICAL FIX FOR DIMENSION ERROR (Robust 1D extraction) ---
     
-    # Get the feature data as a 1D array
-    feature_data = X_aligned.iloc[0].values
-
+    # 1. Determine the positive class SHAP values
+    if isinstance(shap_values_list, list) and len(shap_values_list) > 1:
+        # Multi-class output: select class 1 array
+        shap_array = shap_values_list[1]
+    elif isinstance(shap_values_list, np.ndarray) and shap_values_list.ndim == 3 and shap_values_list.shape[-1] == 2:
+        # Multi-output in single array: select class 1 slice
+        shap_array = shap_values_list[:, :, 1]
+    else:
+        # Single array output
+        shap_array = np.array(shap_values_list)
+        
+    # 2. Extract the single instance and ensure 1D shape (e.g., convert (1, 16) to (16,))
+    # Use .squeeze() to remove all dimensions of size 1, and ensure we take the first element (the only row).
+    shap_values_pos_class = np.squeeze(shap_array[0])
+    
+    # 3. Get the feature data as a 1D array
+    # CRITICAL: Ensure the feature data passed to SHAP has the correct columns and is 1D.
+    feature_data = X_aligned[feature_order].iloc[0].values
+    
+    # 4. Final Sanity Check
+    if len(shap_values_pos_class) != len(feature_data):
+        st.error(f"FATAL: SHAP/Feature length mismatch. SHAP={len(shap_values_pos_class)}, Features={len(feature_data)}. Plotting aborted.")
+        st.stop()
+    # ------------------------------------------------------------------
+    
     # -----------------------------
     # Explanation Object (Needed for Waterfall Plot)
     # -----------------------------
@@ -168,7 +185,7 @@ if st.button("Predict Stroke Risk", type="primary"):
     )
 
     # -----------------------------
-    # Force Plot (FIXED: Using st_shap)
+    # Force Plot (Using st_shap for stability)
     # -----------------------------
     st.subheader("Individual Force Plot")
     
