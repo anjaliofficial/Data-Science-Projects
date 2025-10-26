@@ -1,0 +1,16 @@
+# Python virtual environment
+venv/
+.venv/
+
+# Other common ignored files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment variables
+.env
+.flaskenv
+
+# OS files
+.DS_Store
