@@ -5,7 +5,7 @@ import os
 import numpy as np
 
 st.set_page_config(page_title="Visual Insights", layout="wide")
-st.title("📊 Stroke Data Visual Insights")
+st.title("Stroke Data Visual Insights")
 st.markdown("Explore key trends and risk factor distributions in the dataset.")
 
 # -----------------------------
@@ -23,13 +23,13 @@ CLEANED_CSV_PATH = os.path.join(DATA_DIR, "stroke_cleaned.csv")
 def load_data(path):
     """Loads cleaned data. If not found, attempts to load raw data and clean BMI for visualization."""
     if not os.path.exists(path):
-        st.warning(f"⚠️ Cleaned data file not found at: {path}. Attempting to load raw file.")
+        st.warning(f" Cleaned data file not found at: {path}. Attempting to load raw file.")
         # Fallback to raw file if cleaned is missing, assuming raw is named 'stroke_data.csv'
         raw_path = os.path.join(DATA_DIR, "stroke_data.csv")
         if os.path.exists(raw_path):
             df = pd.read_csv(raw_path)
         else:
-            st.error(f"❌ Raw data file not found at: {raw_path}. Please place your stroke data CSV file in the 'data/' folder.")
+            st.error(f"Raw data file not found at: {raw_path}. Please place your stroke data CSV file in the 'data/' folder.")
             return pd.DataFrame()
     else:
         df = pd.read_csv(path)
@@ -113,7 +113,7 @@ if 'avg_glucose_level' in df.columns and 'bmi' in df.columns:
 # Additional statistics
 # -----------------------------
 st.markdown("---")
-st.subheader("📌 General Dataset Statistics")
+st.subheader(" General Dataset Statistics")
 col_stats1, col_stats2, col_stats3 = st.columns(3)
 
 col_stats1.metric("Total Records", df.shape[0])
