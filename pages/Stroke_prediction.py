@@ -6,7 +6,12 @@ import os
 import shap
 import matplotlib.pyplot as plt
 import streamlit.components.v1 as components
+import warnings
 
+# Suppress warnings that commonly arise from SHAP/Numba
+warnings.filterwarnings("ignore", category=UserWarning)
+
+# --- Configuration ---
 st.set_page_config(page_title="Predict Stroke Risk", layout="centered")
 st.title("🔍 Predict Stroke Risk with SHAP Insights")
 
@@ -15,7 +20,6 @@ st.title("🔍 Predict Stroke Risk with SHAP Insights")
 # -----------------------------
 # The path must be relative to the location of this script (e.g., pages/...)
 BASE_DIR = os.path.dirname(__file__)
-# Go up one level (..) from 'pages' then into 'models'
 MODEL_DIR = os.path.join(BASE_DIR, "..", "models") 
 
 MODEL_PATH = os.path.join(MODEL_DIR, "stroke_model.pkl")
@@ -28,13 +32,12 @@ FEATURES_PATH = os.path.join(MODEL_DIR, "feature_names.pkl")
 def get_expected_value(explainer):
     """Safely retrieves the base value (log-odds) for the positive class (index 1)."""
     ev = explainer.expected_value
-    if isinstance(ev, np.ndarray):
-        # For binary classification (most common TreeExplainer output)
-        if ev.ndim == 1 and ev.size >= 2:
-            return ev[1]  # Return the base value for the positive class (stroke=1)
-        # For single-output models
-        if ev.ndim == 0 or ev.size == 1:
-            return ev.item() if isinstance(ev, np.ndarray) else ev
+    # If the output is an array (typical for multi-output models like RF/XGBoost Classifier)
+    if isinstance(ev, np.ndarray) and ev.ndim >= 1 and ev.size >= 2:
+        return ev[1]  # Return the base value for the positive class (stroke=1)
+    # If it's a single value (typical for single-output models like Logistic Regression)
+    if isinstance(ev, (float, np.ndarray)):
+        return ev.item() if isinstance(ev, np.ndarray) else ev
     return ev
 
 
@@ -47,21 +50,20 @@ def load_artifacts():
         model = joblib.load(MODEL_PATH)
         scaler = joblib.load(SCALER_PATH)
         feature_order = joblib.load(FEATURES_PATH)
-        # TreeExplainer is fast and specific for Random Forest
+        # Use TreeExplainer for tree-based models (fast and accurate)
         explainer = shap.TreeExplainer(model) 
         return model, scaler, feature_order, explainer
     except Exception as e:
-        st.error(f"❌ Error loading artifacts. Please ensure 'train_model.py' has been run successfully and the model files exist in the 'models/' folder. Error: {e}")
+        st.error(f"❌ Error loading artifacts: {e}. Check model files in 'models/'.")
         st.stop()
 
 model, scaler, feature_order, explainer = load_artifacts()
 base_value = get_expected_value(explainer)
+st.sidebar.header("Patient Information")
 
 # -----------------------------
 # User Input
 # -----------------------------
-st.sidebar.header("Patient Information")
-
 def user_input_features():
     gender = st.sidebar.selectbox("Gender", ["Male", "Female", "Other"])
     age = st.sidebar.slider("Age", 0.0, 100.0, 50.0) 
@@ -94,8 +96,12 @@ input_df = user_input_features()
 # Preprocessing (Mimic Training Pipeline)
 # -----------------------------
 
-# 1. Drop 'Other' gender to match training data
-X_raw = input_df[input_df['gender'] != 'Other']
+# 1. Handle 'Other' gender early
+if input_df.iloc[0]['gender'] == 'Other':
+    st.info("The model was trained excluding the 'Other' gender category. Please select 'Male' or 'Female' for prediction.")
+    st.stop()
+
+X_raw = input_df.copy()
 
 # 2. One-Hot Encode (OHE)
 categorical_cols = X_raw.select_dtypes(include=["object"]).columns.tolist()
@@ -105,13 +111,12 @@ X_encoded = pd.get_dummies(X_raw, columns=categorical_cols, drop_first=True)
 X_aligned = pd.DataFrame(columns=feature_order)
 for col in feature_order:
     # Use .get() to insert 0 if the feature (e.g., a specific OHE column) is missing
-    X_aligned[col] = X_encoded.get(col, [0]) 
+    X_aligned[col] = X_encoded.get(col, [0]).astype(float) 
 
-if X_aligned.empty:
-    st.info("Please select a valid gender (Male or Female) to continue the prediction.")
-    st.stop()
+# Ensure final alignment
+X_aligned = X_aligned.fillna(0)[feature_order]
 
-# 4. Scale Input
+# 4. Scale Input (CRITICAL: The model expects scaled data for prediction)
 X_scaled = scaler.transform(X_aligned)
 
 # -----------------------------
@@ -133,8 +138,8 @@ if st.button("Predict Stroke Risk", type="primary"):
     # -----------------------------
     st.markdown("### 🧪 SHAP Feature Interpretation")
 
-    # Use the unscaled, aligned DataFrame X_aligned for SHAP calculation
-    # NOTE: This will return a list of two (1, N) arrays for binary classification
+    # Use the UN-SCALED, aligned DataFrame X_aligned for SHAP calculation 
+    # to ensure the force plot labels show unscaled values.
     shap_values_list = explainer.shap_values(X_aligned)
 
     # Extract SHAP values for the positive class (index 1)
@@ -144,22 +149,22 @@ if st.button("Predict Stroke Risk", type="primary"):
         shap_values_pos_class = shap_values_list # Single output model - SHAPE: (1, N)
 
     # -----------------------------
-    # SHAP Explanation Object (FIX)
+    # SHAP Explanation Object (FIXED for Single Instance)
     # -----------------------------
-    # Create a proper SHAP Explanation object for the single instance
-    # This is the safest way to pass data to SHAP plotting functions.
+    # Create the Explanation object using 1D numpy arrays
     single_instance_explanation = shap.Explanation(
-        values=shap_values_pos_class[0], # 1D SHAP values
+        values=shap_values_pos_class.flatten(), # 1D SHAP values
         base_values=base_value,
         data=X_aligned.iloc[0].values, # 1D feature values
         feature_names=feature_order
     )
 
     # -----------------------------
-    # Force Plot (FIXED)
+    # Force Plot (Uses components.html for stability)
     # -----------------------------
-    st.subheader("Individual Force Plot")
-    shap.initjs()
+    st.subheader("Individual Force Plot (Contribution to Stroke Risk)")
+    # NOTE: You MUST have installed IPython for initjs() to work.
+    shap.initjs() 
 
     # Pass the complete Explanation object to the force plot
     force_plot = shap.plots.force(
@@ -170,7 +175,7 @@ if st.button("Predict Stroke Risk", type="primary"):
     components.html(force_plot.html(), height=400)
 
     # -----------------------------
-    # Waterfall Plot (Also uses 1D vectors)
+    # Waterfall Plot
     # -----------------------------
     st.subheader("Feature Contribution (Waterfall Plot)")
     fig, ax = plt.subplots(figsize=(10, 5))
@@ -185,4 +190,4 @@ if st.button("Predict Stroke Risk", type="primary"):
 # Show Input DataFrame
 # -----------------------------
 with st.expander("Show Encoded and Aligned Input Features (What the model sees)"):
-    st.dataframe(X_aligned.style.set_properties(**{'font-size': '10pt'}))
+    st.dataframe(X_aligned.T.style.set_properties(**{'font-size': '10pt'}))
