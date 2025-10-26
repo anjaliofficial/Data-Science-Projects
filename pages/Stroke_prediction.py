@@ -197,5 +197,5 @@ if st.button("Predict Stroke Risk", type="primary"):
 # Show Input DataFrame
 # -----------------------------
 with st.expander("Show Encoded and Aligned Input Features (What the model sees)"):
-    # Transpose for easier viewing
+    # Transpose for easier viewingpip install plotly
     st.dataframe(X_aligned.T.style.set_properties(**{'font-size': '10pt'}))
