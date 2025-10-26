@@ -104,7 +104,7 @@ X_raw = input_df.copy()
 categorical_cols = X_raw.select_dtypes(include=["object"]).columns.tolist()
 X_encoded = pd.get_dummies(X_raw, columns=categorical_cols, drop_first=True)
 
-# 3. Align Columns (Fixes: AttributeError)
+# 3. Align Columns (Fixes: AttributeError from previous bug)
 X_aligned = pd.DataFrame(columns=feature_order)
 for col in feature_order:
     X_aligned[col] = X_encoded.get(col, [0]) 
@@ -141,19 +141,29 @@ if st.button("Predict Stroke Risk", type="primary"):
     # Use the UN-SCALED, aligned DataFrame X_aligned for SHAP calculation for readable values
     shap_values_list = explainer.shap_values(X_aligned)
 
-    # Extract SHAP values for the positive class (index 1)
+    # --- CRITICAL FIX FOR DIMENSION ERROR ---
+    # We must ensure shap_values_pos_class is a 1D array.
     if isinstance(shap_values_list, list) and len(shap_values_list) > 1:
-        shap_values_pos_class = shap_values_list[1] # Class 1 (stroke) - SHAPE: (1, N)
+        # Get class 1 values, and extract the single row [0] to make it 1D
+        shap_values_pos_class = shap_values_list[1][0] 
+    elif isinstance(shap_values_list, np.ndarray) and shap_values_list.ndim == 2:
+        # If it's a 2D array (1, N), extract the single row [0] to make it 1D
+        shap_values_pos_class = shap_values_list[0]
     else:
-        shap_values_pos_class = shap_values_list 
+        # Fallback to flatten (though the above slices are more robust)
+        shap_values_pos_class = shap_values_list.flatten()
+    # ----------------------------------------
+    
+    # Get the feature data as a 1D array
+    feature_data = X_aligned.iloc[0].values
 
     # -----------------------------
-    # SHAP Explanation Object 
+    # Explanation Object (Needed for Waterfall Plot)
     # -----------------------------
     single_instance_explanation = shap.Explanation(
-        values=shap_values_pos_class.flatten(), # 1D SHAP values
+        values=shap_values_pos_class, 
         base_values=base_value,
-        data=X_aligned.iloc[0].values, # 1D feature values
+        data=feature_data,
         feature_names=feature_order
     )
 
@@ -162,10 +172,12 @@ if st.button("Predict Stroke Risk", type="primary"):
     # -----------------------------
     st.subheader("Individual Force Plot")
     
-    # Use st_shap for stable rendering in Streamlit, avoiding initjs() issues
-    # Note: st_shap requires the explainer object for certain rendering modes.
+    # Pass the 1D arrays directly to the force_plot function.
     st_shap(shap.force_plot(
-        single_instance_explanation, 
+        base_value,                      # Expected Value (Float)
+        shap_values_pos_class,           # SHAP Values (1D Array)
+        feature_data,                    # Feature Data (1D Array)
+        feature_names=feature_order,     # Feature Names (List)
         matplotlib=False
     ))
 
