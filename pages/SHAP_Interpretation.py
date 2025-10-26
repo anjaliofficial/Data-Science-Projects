@@ -124,26 +124,39 @@ except Exception as e:
     st.stop()
 
 # -----------------------------
-# 🌟 ROBUST SHAP OUTPUT SELECTION (Fixed logic to handle all cases)
+# 🌟 ROBUST SHAP OUTPUT SELECTION (Fixed logic for 3D array)
 # -----------------------------
 expected_features = len(feature_order)
 
 if isinstance(shap_values, list) and len(shap_values) > 1:
-    # Case 1: Standard multi-class (list of arrays, one for each class)
+    # Case 1: Standard multi-class (list of arrays)
     shap_values_class1 = np.array(shap_values[1])
     expected_value_class1 = explainer.expected_value[1] 
     st.info("Using SHAP values for **Class 1 (Stroke)** from a list output.")
     
+elif isinstance(shap_values, np.ndarray) and shap_values.ndim == 3 and shap_values.shape[2] == 2:
+    # Case 2: CRITICAL FIX for (N, F, 2) array (Multi-output in a single array)
+    # Extract the SHAP values for the positive class (index 1)
+    shap_values_class1 = shap_values[:, :, 1]
+    
+    # Safely get the corresponding expected value for the positive class
+    if isinstance(explainer.expected_value, np.ndarray) and explainer.expected_value.ndim == 1:
+        expected_value_class1 = explainer.expected_value[1]
+    else:
+        # Fallback if the expected_value isn't clearly indexed
+        expected_value_class1 = explainer.expected_value
+        
+    st.success(f"Successfully extracted SHAP values for **Class 1 (Stroke)** from 3D array shape: {shap_values.shape}.")
+    
 elif isinstance(shap_values, np.ndarray) and shap_values.shape[-1] == expected_features:
-    # Case 2: Single-output model with correct feature count
+    # Case 3: Single-output model with correct feature count (N, F)
     shap_values_class1 = shap_values
     expected_value_class1 = explainer.expected_value
-    st.info("Using SHAP values for single-output model (correct shape).")
+    st.info("Using SHAP values for single-output model (N, F).")
     
 elif isinstance(shap_values, np.ndarray) and shap_values.shape[-1] > expected_features and shap_values.shape[-1] % expected_features == 0:
-    # Case 3: CRITICAL FIX for N x 32 array when N x 16 is expected
+    # Case 4: Fix for N x 32 array when N x 16 is expected (If your model was a Keras/TF flat output)
     num_classes = shap_values.shape[-1] // expected_features
-    # Select the last 'expected_features' columns (assuming positive class is last)
     shap_values_class1 = shap_values[:, -expected_features:]
     
     if isinstance(explainer.expected_value, np.ndarray) and len(explainer.expected_value) == num_classes:
