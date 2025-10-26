@@ -5,9 +5,8 @@ import joblib
 import os
 import shap
 import matplotlib.pyplot as plt
-from streamlit_shap import st_shap
+import streamlit.components.v1 as components 
 import warnings
-import streamlit.components.v1 as components # Import for robust force plot rendering
 
 # Suppress warnings related to nopython compilation which often appear with shap/numba
 warnings.filterwarnings("ignore", message=".*The 'nopython' keyword.*")
@@ -21,6 +20,7 @@ st.title("🔍 Predict Stroke Risk with SHAP Insights")
 # -----------------------------
 # Paths
 # -----------------------------
+# Adjust paths based on your project structure:
 # Assuming this script is in 'pages/' and artifacts are in 'models/' and 'data/'
 BASE_DIR = os.path.dirname(__file__)
 DATA_PATH = os.path.join(BASE_DIR, "../data/stroke_cleaned.csv")
@@ -41,6 +41,7 @@ except FileNotFoundError:
 
 try:
     model = joblib.load(MODEL_PATH)
+    # scaler is loaded but not used in this specific file, kept for completeness
     scaler = joblib.load(SCALER_PATH)
     # feature_order is crucial and must contain ALL features the model was TRAINED on
     feature_order = joblib.load(FEATURES_PATH) 
@@ -58,14 +59,12 @@ if target_col not in df.columns:
     st.stop()
 
 X = df.drop(columns=[target_col])
-y = df[target_col]
 
 # Detect categorical columns dynamically
 categorical_cols = X.select_dtypes(include=["object"]).columns.tolist()
 
 # One-hot encode categorical features (matching training logic)
 X_encoded = pd.get_dummies(X, columns=categorical_cols, drop_first=True)
-# Coerce to numeric and fill NaN from potential dummy creation to match model input
 X_encoded = X_encoded.apply(pd.to_numeric, errors="coerce").fillna(0) 
 
 # -----------------------------
@@ -73,18 +72,18 @@ X_encoded = X_encoded.apply(pd.to_numeric, errors="coerce").fillna(0)
 # -----------------------------
 st.markdown("### ⚙️ Feature Alignment Check")
 
-# 1. Add missing columns (features present in training but not in current data)
+# 1. Add missing columns
 missing_cols = [c for c in feature_order if c not in X_encoded.columns]
 for c in missing_cols:
     X_encoded[c] = 0
 
-# 2. Drop extra columns (features present in current data but not in training)
+# 2. Drop extra columns
 extra_cols = [c for c in X_encoded.columns if c not in feature_order]
 if extra_cols:
     X_encoded = X_encoded.drop(columns=extra_cols)
-    st.warning(f"Dropped {len(extra_cols)} extra features: {extra_cols[:2]}...")
+    st.warning(f"Dropped {len(extra_cols)} extra features.")
 
-# 3. Final Reorder (ensures columns are in the exact order the model expects)
+# 3. Final Reorder
 X_encoded = X_encoded[feature_order]
 
 # Final check
@@ -107,34 +106,54 @@ else:
     shap_data = X_encoded
 
 st.write("Calculating SHAP values... please wait ⏳")
-# The output is a list for multi-class/multi-output models, array otherwise
 shap_values = explainer.shap_values(shap_data)
 
 # -----------------------------
-# SHAP OUTPUT SELECTION (Focus on Positive Class: Stroke=1)
+# 🌟 ROBUST SHAP OUTPUT SELECTION (Fixes 16 vs 32 Mismatch)
 # -----------------------------
+expected_features = len(feature_order)
+
 if isinstance(shap_values, list) and len(shap_values) > 1:
-    # Use the SHAP values for the positive class (Stroke Risk, index 1)
+    # Standard multi-class (list of arrays, one for each class)
     shap_values_class1 = np.array(shap_values[1])
     expected_value_class1 = explainer.expected_value[1] 
-    st.info("Using SHAP values for **Class 1 (Stroke)**.")
-elif isinstance(shap_values, np.ndarray):
-    # Handles single-output models (e.g., linear regression or binary classifier using a single output)
+    st.info("Using SHAP values for **Class 1 (Stroke)** from a list output.")
+    
+elif isinstance(shap_values, np.ndarray) and shap_values.shape[-1] == expected_features:
+    # Single-output model with correct feature count
     shap_values_class1 = shap_values
     expected_value_class1 = explainer.expected_value
-    st.info("Using SHAP values for single-output model.")
+    st.info("Using SHAP values for single-output model (correct shape).")
+    
+elif isinstance(shap_values, np.ndarray) and shap_values.shape[-1] > expected_features and shap_values.shape[-1] % expected_features == 0:
+    # 🚨 CRITICAL FIX for N x 32 array when N x 16 is expected
+    # Assumes the model is binary (2 classes) and output is a flat array (N, features * 2)
+    num_classes = shap_values.shape[-1] // expected_features
+    
+    # We select the last 'expected_features' columns, assuming they belong to the positive class (Stroke)
+    shap_values_class1 = shap_values[:, -expected_features:]
+    
+    # Select the corresponding expected value (Base Value)
+    if isinstance(explainer.expected_value, np.ndarray) and len(explainer.expected_value) == num_classes:
+        expected_value_class1 = explainer.expected_value[-1]
+    else:
+        # Fallback if explainer only returned a single expected value
+        expected_value_class1 = explainer.expected_value
+        
+    st.warning(f"Detected N x {shap_values.shape[-1]} SHAP array. Extracted **Class {num_classes-1} (Stroke)** values.")
+    
 else:
-    st.error("❌ SHAP values are not in an expected format.")
+    st.error("❌ SHAP values are not in an expected format or shape. Cannot plot.")
     st.stop()
+
 
 # -----------------------------
 # 1️⃣ SHAP Summary Plot
 # -----------------------------
 st.markdown("---")
 st.markdown("### 📈 SHAP Summary Plot (Impact on Stroke Risk)")
-# Use shap.summary_plot to display the Summary Plot
 try:
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(10, 6))
     shap.summary_plot(shap_values_class1, shap_data, show=False, max_display=15, plot_type="dot")
     st.pyplot(fig)
     plt.close(fig)
@@ -150,7 +169,7 @@ st.markdown("### 🔍 Feature Importance (Mean |SHAP| Values)")
 
 mean_abs_shap = np.abs(shap_values_class1).mean(axis=0).flatten()
 
-# Use the feature names from the SHAP data (which is aligned)
+# Ensure we use the aligned feature names
 plotting_feature_names = shap_data.columns.tolist() 
 
 feature_len = len(plotting_feature_names)
@@ -158,11 +177,11 @@ shap_len = len(mean_abs_shap)
 
 # Create the Importance DataFrame
 if feature_len != shap_len:
+    # This block should now rarely be hit due to the SHAP output selection fix
     st.error(
         f"Assertion Failed: Features={feature_len}, SHAP Output={shap_len}. "
-        f"This indicates a feature length mismatch. Slicing to minimal length for plot."
+        f"Mismatch after output selection. Slicing for safety."
     )
-    # Use the shorter list to avoid indexing errors
     min_len = min(feature_len, shap_len)
     importance_df = pd.DataFrame({
         "Feature": plotting_feature_names[:min_len],
@@ -191,12 +210,12 @@ if len(shap_data) > 0:
     individual_data = shap_data.iloc[[index_choice]] 
     individual_shap_values = shap_values_class1[index_choice] 
 
-    st.write("**Selected sample data:**")
-    st.dataframe(individual_data.T) # Transpose for easier viewing
+    st.write("**Selected sample data (Transposed):**")
+    st.dataframe(individual_data.T)
 
     st.write("**SHAP Force Plot for selected prediction:**")
     try:
-        # Generate the Force Plot. Using st.components.v1.html for robust rendering
+        # Generate the Force Plot. Using components.html for robust rendering (CRITICAL FIX)
         force_html = shap.force_plot(
             expected_value_class1,
             individual_shap_values,
