@@ -9,12 +9,12 @@ import streamlit.components.v1 as components
 from streamlit_shap import st_shap # Dedicated library for stable Force Plot rendering
 import warnings
 
-# Suppress warnings
-warnings.warnings.filterwarnings("ignore", category=UserWarning)
-warnings.warnings.filterwarnings("ignore", category=FutureWarning)
+# Suppress warnings (FIXED: Removed the extra 'warnings.')
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 st.set_page_config(page_title="Predict Stroke Risk", layout="centered")
-st.title("🔍 Predict Stroke Risk with SHAP Insights")
+st.title("Predict Stroke Risk with SHAP Insights")
 
 # -----------------------------
 # Paths
@@ -57,7 +57,7 @@ def load_artifacts():
         explainer = shap.TreeExplainer(model) 
         return model, scaler, feature_order, explainer
     except Exception as e:
-        st.error(f"❌ Error loading artifacts: {e}. Check model files in 'models/'.")
+        st.error(f"Error loading artifacts: {e}. Check model files in 'models/'.")
         st.stop()
 
 model, scaler, feature_order, explainer = load_artifacts()
