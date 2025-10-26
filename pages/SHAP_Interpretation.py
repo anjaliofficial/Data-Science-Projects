@@ -17,8 +17,8 @@ warnings.filterwarnings("ignore", message=".*The 'nopython' keyword.*")
 # -----------------------------
 # Page Config
 # -----------------------------
-st.set_page_config(page_title="🔍 Predict Stroke Risk with SHAP Insights", layout="wide")
-st.title("🔍 Predict Stroke Risk with SHAP Insights")
+st.set_page_config(page_title=" Predict Stroke Risk with SHAP Insights", layout="wide")
+st.title(" Predict Stroke Risk with SHAP Insights")
 
 # -----------------------------
 # Paths
@@ -37,7 +37,7 @@ try:
     st.subheader("📊 Data Preview")
     st.dataframe(df.head())
 except FileNotFoundError:
-    st.error("❌ stroke_cleaned.csv not found. Please check your /data folder.")
+    st.error(" stroke_cleaned.csv not found. Please check your /data folder.")
     st.stop()
 
 try:
@@ -69,7 +69,7 @@ X_encoded = X_encoded.apply(pd.to_numeric, errors="coerce").fillna(0)
 # -----------------------------
 # Robust Feature Alignment (Critical for SHAP)
 # -----------------------------
-st.markdown("### ⚙️ Feature Alignment Check")
+st.markdown("### Feature Alignment Check")
 
 # 1. Add missing columns
 missing_cols = [c for c in feature_order if c not in X_encoded.columns]
@@ -120,7 +120,7 @@ try:
         st.info(f"DEBUG: Array shape: {shap_values.shape}")
     
 except Exception as e:
-    st.error(f"❌ Error during SHAP calculation: {e}. Check your model type or scaling.")
+    st.error(f" Error during SHAP calculation: {e}. Check your model type or scaling.")
     st.stop()
 
 # -----------------------------
@@ -154,7 +154,7 @@ elif isinstance(shap_values, np.ndarray) and shap_values.shape[-1] == expected_f
 # ... (omitted Case 4 for brevity, as Case 2 is the most likely format now)
     
 else:
-    st.error("❌ SHAP values are not in an expected format or shape. Cannot plot.")
+    st.error(" SHAP values are not in an expected format or shape. Cannot plot.")
     st.stop()
 
 
@@ -162,7 +162,7 @@ else:
 # 1️⃣ SHAP Summary Plot
 # -----------------------------
 st.markdown("---")
-st.markdown("### 📈 SHAP Summary Plot (Impact on Stroke Risk)")
+st.markdown("###  SHAP Summary Plot (Impact on Stroke Risk)")
 try:
     fig, ax = plt.subplots(figsize=(10, 6))
     shap.summary_plot(shap_values_class1, shap_data_unscaled, show=False, max_display=15, plot_type="dot") 
@@ -176,7 +176,7 @@ except Exception as e:
 # 2️⃣ Mean |SHAP| Feature Importance
 # -----------------------------
 st.markdown("---")
-st.markdown("### 🔍 Feature Importance (Mean |SHAP| Values)")
+st.markdown("###  Feature Importance (Mean |SHAP| Values)")
 
 mean_abs_shap = np.abs(shap_values_class1).mean(axis=0).flatten()
 plotting_feature_names = shap_data_unscaled.columns.tolist() 
@@ -204,7 +204,7 @@ st.bar_chart(importance_df.set_index("Feature"))
 # 3️⃣ Individual Prediction Exploration
 # -----------------------------
 st.markdown("---")
-st.markdown("### 🧩 Explore Individual Prediction")
+st.markdown("###  Explore Individual Prediction")
 
 if len(shap_data_unscaled) > 0:
     index_choice = st.slider("Select sample index:", 0, len(shap_data_unscaled) - 1, 0)
@@ -237,7 +237,7 @@ if len(shap_data_unscaled) > 0:
         )
         
     except Exception as e:
-        st.error(f"❌ Error generating force plot: {e}")
+        st.error(f" Error generating force plot: {e}")
         st.info("Ensure `pip install streamlit-shap` and `pip install ipython` are complete.")
 else:
     st.warning("Not enough data to show individual SHAP plots.")
